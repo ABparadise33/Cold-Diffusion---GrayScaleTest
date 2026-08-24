@@ -1,0 +1,238 @@
+from __future__ import annotations
+
+import copy
+import math
+import random
+import time
+from contextlib import nullcontext
+from pathlib import Path
+
+import numpy as np
+import torch
+
+from .bridge import GrayBridge
+from .color import gray_anchor, normalized_lab_to_rgb, rgb_to_normalized_lab
+from .io import append_csv, atomic_torch_save, save_labeled_grid, save_trajectory_grid, update_ema
+from .metrics import delta_e76, psnr, ssim, trajectory_monotonic_fraction
+
+
+class Trainer:
+    def __init__(self, model, bridge, train_loader, val_loader, config, device):
+        self.model = model.to(device)
+        self.ema = copy.deepcopy(model).to(device).eval().requires_grad_(False)
+        self.bridge: GrayBridge = bridge.to(device)
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.config = config
+        self.device = device
+        self.mode = config["mode"]
+        self.output = Path(config["output_dir"])
+        self.output.mkdir(parents=True, exist_ok=True)
+        train_cfg = config["training"]
+        self.max_steps = int(train_cfg["max_steps"])
+        self.grad_accum = int(train_cfg["grad_accum"])
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=float(train_cfg["learning_rate"]))
+        self.amp = bool(train_cfg.get("amp", True)) and device.type == "cuda"
+        try:
+            self.scaler = torch.amp.GradScaler("cuda", enabled=self.amp)
+        except (AttributeError, TypeError):
+            self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp)
+        self.step = 0
+        self.best_psnr = -math.inf
+        self._train_iter = iter(train_loader)
+
+    def _next_batch(self):
+        try:
+            return next(self._train_iter)
+        except StopIteration:
+            self._train_iter = iter(self.train_loader)
+            return next(self._train_iter)
+
+    def _autocast(self):
+        if self.amp:
+            return torch.autocast(device_type="cuda", dtype=torch.float16)
+        return nullcontext()
+
+    def _prepare(self, batch):
+        raw_rgb = batch["raw"].to(self.device, non_blocking=True)
+        reference_rgb = batch["reference"].to(self.device, non_blocking=True)
+        raw_lab = rgb_to_normalized_lab(raw_rgb)
+        reference_lab = rgb_to_normalized_lab(reference_rgb)
+        return raw_rgb, reference_rgb, raw_lab, reference_lab, gray_anchor(raw_lab)
+
+    def _training_pair(self, raw_lab, reference_lab, anchor):
+        batch = reference_lab.shape[0]
+        if self.mode == "cold_gray":
+            t = torch.randint(1, self.bridge.steps + 1, (batch,), device=self.device)
+            model_input = self.bridge.degrade(reference_lab, anchor, t)
+        elif self.mode == "gray_oneshot":
+            t = torch.full((batch,), self.bridge.steps, device=self.device, dtype=torch.long)
+            model_input = anchor
+        elif self.mode == "rgb_oneshot":
+            t = torch.full((batch,), self.bridge.steps, device=self.device, dtype=torch.long)
+            model_input = raw_lab
+        else:
+            raise ValueError(f"unsupported mode: {self.mode}")
+        return model_input, reference_lab, t
+
+    @torch.no_grad()
+    def predict(self, model, raw_lab, return_trajectory=False):
+        anchor = gray_anchor(raw_lab)
+        batch = raw_lab.shape[0]
+        full_t = torch.full((batch,), self.bridge.steps, device=self.device, dtype=torch.long)
+        if self.mode == "cold_gray":
+            return self.bridge.sample(model, anchor, return_trajectory=return_trajectory)
+        model_input = anchor if self.mode == "gray_oneshot" else raw_lab
+        pred = model(model_input, full_t).clamp(-1, 1)
+        return (pred, [model_input, pred]) if return_trajectory else pred
+
+    def _checkpoint_payload(self):
+        payload = {
+            "step": self.step,
+            "best_psnr": self.best_psnr,
+            "model": self.model.state_dict(),
+            "ema": self.ema.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "scaler": self.scaler.state_dict(),
+            "config": self.config,
+            "rng": {
+                "python": random.getstate(),
+                "numpy": np.random.get_state(),
+                "torch": torch.get_rng_state(),
+            },
+        }
+        if torch.cuda.is_available():
+            payload["rng"]["cuda"] = torch.cuda.get_rng_state_all()
+        return payload
+
+    def save_checkpoint(self, is_best=False):
+        checkpoint_dir = self.output / "checkpoints"
+        payload = self._checkpoint_payload()
+        atomic_torch_save(payload, checkpoint_dir / "latest.pt")
+        atomic_torch_save(payload, checkpoint_dir / f"step_{self.step:06d}.pt")
+        if is_best:
+            atomic_torch_save(payload, checkpoint_dir / "best.pt")
+
+    def load_checkpoint(self, path: str | Path):
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        saved_config = checkpoint.get("config", {})
+        for key in ("mode", "model", "diffusion"):
+            if key in saved_config and saved_config[key] != self.config[key]:
+                raise ValueError(f"resume config mismatch for {key}: {saved_config[key]!r} != {self.config[key]!r}")
+        self.model.load_state_dict(checkpoint["model"])
+        self.ema.load_state_dict(checkpoint["ema"])
+        self.optimizer.load_state_dict(checkpoint["optimizer"])
+        if checkpoint.get("scaler"):
+            self.scaler.load_state_dict(checkpoint["scaler"])
+        self.step = int(checkpoint["step"])
+        self.best_psnr = float(checkpoint.get("best_psnr", -math.inf))
+        rng = checkpoint.get("rng", {})
+        if "python" in rng:
+            random.setstate(rng["python"])
+        if "numpy" in rng:
+            np.random.set_state(rng["numpy"])
+        if "torch" in rng:
+            torch.set_rng_state(rng["torch"].cpu())
+        if self.device.type == "cuda" and "cuda" in rng:
+            torch.cuda.set_rng_state_all(rng["cuda"])
+        print(f"resumed from step {self.step}: {path}")
+
+    @torch.no_grad()
+    def validate(self):
+        self.ema.eval()
+        totals = {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0, "monotonic": 0.0}
+        count = 0
+        sample = None
+        max_batches = int(self.config["training"].get("max_val_batches", 20))
+        for batch_index, batch in enumerate(self.val_loader):
+            if batch_index >= max_batches:
+                break
+            raw_rgb, reference_rgb, raw_lab, reference_lab, anchor = self._prepare(batch)
+            pred_lab, trajectory = self.predict(self.ema, raw_lab, return_trajectory=True)
+            pred_rgb = normalized_lab_to_rgb(pred_lab)
+            batch_size = pred_rgb.shape[0]
+            totals["psnr"] += psnr(pred_rgb, reference_rgb).sum().item()
+            totals["ssim"] += ssim(pred_rgb, reference_rgb).sum().item()
+            totals["delta_e76"] += delta_e76(pred_lab, reference_lab).sum().item()
+            totals["monotonic"] += trajectory_monotonic_fraction(trajectory, reference_lab).sum().item()
+            count += batch_size
+            if sample is None:
+                full_t = torch.full((batch_size,), self.bridge.steps, device=self.device, dtype=torch.long)
+                direct_lab = self.ema(anchor, full_t).clamp(-1, 1)
+                sample = (raw_rgb, normalized_lab_to_rgb(anchor), normalized_lab_to_rgb(direct_lab), pred_rgb, reference_rgb, trajectory)
+        if count == 0:
+            raise RuntimeError("validation loader produced no samples")
+        metrics = {key: value / count for key, value in totals.items()}
+        if sample is not None:
+            raw, gray, direct, pred, reference, trajectory = sample
+            save_labeled_grid(
+                [("raw", raw), ("gray anchor", gray), ("direct", direct), ("sampled", pred), ("reference", reference)],
+                self.output / "samples" / f"step_{self.step:06d}.png",
+            )
+            save_trajectory_grid(trajectory, self.output / "trajectories" / f"step_{self.step:06d}.png")
+        return metrics
+
+    def train(self):
+        train_cfg = self.config["training"]
+        log_every = int(train_cfg["log_every"])
+        validate_every = int(train_cfg["validate_every"])
+        save_every = int(train_cfg["save_every"])
+        ema_decay = float(train_cfg["ema_decay"])
+        ema_every = int(train_cfg["ema_update_every"])
+        running = []
+        start = time.time()
+        self.optimizer.zero_grad(set_to_none=True)
+
+        while self.step < self.max_steps:
+            step_losses = []
+            for _ in range(self.grad_accum):
+                batch = self._next_batch()
+                _, _, raw_lab, reference_lab, anchor = self._prepare(batch)
+                model_input, target, t = self._training_pair(raw_lab, reference_lab, anchor)
+                with self._autocast():
+                    prediction = self.model(model_input, t)
+                    loss = (prediction - target).abs().mean()
+                self.scaler.scale(loss / self.grad_accum).backward()
+                step_losses.append(loss.detach().item())
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            self.optimizer.zero_grad(set_to_none=True)
+            self.step += 1
+            if self.step % ema_every == 0:
+                update_ema(self.ema, self.model, ema_decay)
+            running.append(sum(step_losses) / len(step_losses))
+
+            if self.step % log_every == 0:
+                elapsed = time.time() - start
+                avg_loss = sum(running) / len(running)
+                print(f"step={self.step} loss={avg_loss:.6f} elapsed={elapsed:.1f}s")
+                append_csv(self.output / "metrics.csv", {
+                    "step": self.step,
+                    "train_l1": avg_loss,
+                    "val_psnr": "",
+                    "val_ssim": "",
+                    "val_delta_e76": "",
+                    "trajectory_monotonic": "",
+                })
+                running.clear()
+                start = time.time()
+
+            validation = None
+            if self.step % validate_every == 0 or self.step == self.max_steps:
+                validation = self.validate()
+                print("validation", {k: round(v, 5) for k, v in validation.items()})
+                append_csv(self.output / "metrics.csv", {
+                    "step": self.step,
+                    "train_l1": "",
+                    "val_psnr": validation["psnr"],
+                    "val_ssim": validation["ssim"],
+                    "val_delta_e76": validation["delta_e76"],
+                    "trajectory_monotonic": validation["monotonic"],
+                })
+
+            if self.step % save_every == 0 or self.step == self.max_steps:
+                score = validation["psnr"] if validation is not None else -math.inf
+                is_best = score > self.best_psnr
+                if is_best:
+                    self.best_psnr = score
+                self.save_checkpoint(is_best=is_best)
