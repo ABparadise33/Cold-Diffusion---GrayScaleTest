@@ -173,15 +173,24 @@ evaluation/cold_gray_50k_512/
 ├── metrics.json
 ├── training_curves.png
 ├── training_summary.json
-├── extended_metrics.csv  # 90 張逐張結果；最後一列是 __mean__
-├── extended_metrics.md   # 可直接閱讀的平均表
-├── predictions/          # 90 張模型輸出
+├── direct_vs_algorithm2.md  # 先看這個：同 checkpoint 的平均比較
+├── direct_vs_algorithm2.csv
+├── direct_metrics.csv       # Direct 的 90 張逐張結果
+├── extended_metrics.csv     # Algorithm 2 的 90 張逐張結果
+├── direct_predictions/      # Direct 輸出
+├── predictions/             # Algorithm 2 輸出
 ├── references/           # 與輸出對齊的 90 張 GT
-├── batch_000.png          # raw → gray → prediction → reference
+├── batch_000.png          # raw → gray → Direct → Algorithm 2 → reference
 └── trajectory_000.png     # reverse 0/8 → 8/8，由左至右
 ```
 
-`extended_metrics.csv` 包含 FlowIE 原本的 14 項：
+Direct 與 Algorithm 2 使用同一個 Cold checkpoint，不需要重新訓練：
+
+- Direct：`R(gray, T)`，模型只執行一次。
+- Algorithm 2：從相同 gray 開始，依序執行 `T → 1`。
+- Trajectory：Algorithm 2 每一步的影像；不是第三個模型。
+
+兩種方法都評測 FlowIE 原本的 14 項：
 
 - 越高越好：PSNR-Y/RGB、SSIM-Y/RGB、MS-SSIM、MUSIQ、CLIP-IQA、Entropy、MI、UIQM
 - 越低越好：LPIPS、NIQE、KL、DUCD

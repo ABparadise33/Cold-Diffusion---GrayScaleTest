@@ -225,11 +225,14 @@ def evaluate_extended_metrics(
     device: torch.device,
     eval_size: int = 256,
     cold_scores: dict[str, dict[str, float]] | None = None,
+    pyiqa_metrics=None,
+    progress_label: str = "extended_metrics",
 ):
     prediction_dir = Path(prediction_dir)
     reference_dir = Path(reference_dir)
     output_csv = Path(output_csv)
-    pyiqa_metrics = create_pyiqa_metrics(device)
+    if pyiqa_metrics is None:
+        pyiqa_metrics = create_pyiqa_metrics(device)
     ducd = DUCD().to(device)
     scores = {name: [] for name in ALL_METRICS}
     rows = []
@@ -258,13 +261,14 @@ def evaluate_extended_metrics(
             scores[metric_name].append(row[metric_name])
         rows.append(row)
         if index % 10 == 0 or index == len(names):
-            print(f"extended_metrics={index}/{len(names)}")
+            print(f"{progress_label}={index}/{len(names)}")
 
     means = {name: float(np.mean(values)) for name, values in scores.items()}
     output_metrics = ALL_METRICS
     if cold_scores is not None:
-        output_metrics = OUTPUT_METRICS
-        for metric_name in COLD_METRICS:
+        extra_metrics = tuple(next(iter(cold_scores.values())))
+        output_metrics = ALL_METRICS + extra_metrics
+        for metric_name in extra_metrics:
             means[metric_name] = float(np.mean([row[metric_name] for row in rows]))
     mean_row = {"image": "__mean__", **means}
     output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -279,3 +283,68 @@ def evaluate_extended_metrics(
         "means": means,
         "directions": METRIC_DIRECTIONS,
     }
+
+
+def save_method_comparison(
+    direct_means: dict[str, float],
+    algorithm2_means: dict[str, float],
+    output_csv: str | Path,
+):
+    """Compare direct reconstruction and Algorithm 2 from the same Cold model."""
+    output_csv = Path(output_csv)
+    metric_names = ALL_METRICS + ("delta_e76", "trajectory_monotonic")
+    rows = []
+    for metric_name in metric_names:
+        direct_value = direct_means.get(metric_name)
+        algorithm2_value = algorithm2_means.get(metric_name)
+        direction = METRIC_DIRECTIONS[metric_name]
+        if direct_value is None:
+            winner = "Algorithm 2 diagnostic only"
+            delta = None
+        else:
+            delta = algorithm2_value - direct_value
+            if math.isclose(direct_value, algorithm2_value, rel_tol=1e-9, abs_tol=1e-12):
+                winner = "tie"
+            elif direction == "higher":
+                winner = "Algorithm 2" if algorithm2_value > direct_value else "Direct"
+            else:
+                winner = "Algorithm 2" if algorithm2_value < direct_value else "Direct"
+        rows.append(
+            {
+                "metric": metric_name,
+                "better": direction,
+                "direct": direct_value,
+                "algorithm2": algorithm2_value,
+                "algorithm2_minus_direct": delta,
+                "winner": winner,
+            }
+        )
+
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "metric",
+        "better",
+        "direct",
+        "algorithm2",
+        "algorithm2_minus_direct",
+        "winner",
+    ]
+    with output_csv.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    lines = [
+        "| Metric | Better | Direct | Algorithm 2 | Winner |",
+        "|---|---:|---:|---:|---|",
+    ]
+    for row in rows:
+        arrow = "↑" if row["better"] == "higher" else "↓"
+        direct_text = "N/A" if row["direct"] is None else f"{row['direct']:.4f}"
+        algorithm2_text = f"{row['algorithm2']:.4f}"
+        lines.append(
+            f"| {row['metric'].upper()} | {arrow} | {direct_text} | "
+            f"{algorithm2_text} | {row['winner']} |"
+        )
+    output_csv.with_suffix(".md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return rows

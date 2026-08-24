@@ -56,3 +56,37 @@ def test_extended_metrics_writes_per_image_and_mean(monkeypatch, tmp_path):
     assert result["means"]["delta_e76"] == 11.0
     assert result["means"]["trajectory_monotonic"] == 0.875
     assert output_csv.with_suffix(".md").is_file()
+
+    direct_csv = tmp_path / "direct_metrics.csv"
+    direct_result = extended_metrics.evaluate_extended_metrics(
+        prediction_dir,
+        reference_dir,
+        names,
+        direct_csv,
+        torch.device("cpu"),
+        eval_size=32,
+        cold_scores={name: {"delta_e76": score["delta_e76"]} for name, score in cold_scores.items()},
+        pyiqa_metrics=dummy_metrics,
+    )
+    with direct_csv.open(newline="", encoding="utf-8") as handle:
+        direct_fields = csv.DictReader(handle).fieldnames
+    assert direct_result["means"]["delta_e76"] == 11.0
+    assert "trajectory_monotonic" not in direct_fields
+
+
+def test_method_comparison_marks_winner_and_algorithm_only_metric(tmp_path):
+    direct = {name: 0.5 for name in extended_metrics.ALL_METRICS}
+    direct["delta_e76"] = 12.0
+    algorithm2 = {name: 0.6 for name in extended_metrics.ALL_METRICS}
+    algorithm2.update({"delta_e76": 10.0, "trajectory_monotonic": 0.875})
+
+    output_csv = tmp_path / "direct_vs_algorithm2.csv"
+    rows = extended_metrics.save_method_comparison(direct, algorithm2, output_csv)
+    rows_by_metric = {row["metric"]: row for row in rows}
+
+    assert rows_by_metric["psnr_rgb"]["winner"] == "Algorithm 2"
+    assert rows_by_metric["lpips"]["winner"] == "Direct"
+    assert rows_by_metric["delta_e76"]["winner"] == "Algorithm 2"
+    assert rows_by_metric["trajectory_monotonic"]["direct"] is None
+    assert output_csv.is_file()
+    assert output_csv.with_suffix(".md").is_file()

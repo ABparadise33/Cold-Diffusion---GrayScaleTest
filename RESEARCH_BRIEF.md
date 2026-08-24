@@ -9,8 +9,8 @@ not merely a pleasing final image.
 
 ## Hypothesis
 
-Algorithm 2 will improve over a matched grayscale one-shot U-Net, and most
-reverse steps will reduce paired-reference color error.
+Algorithm 2 will improve over direct reconstruction from the same trained Cold
+model, and most reverse steps will reduce paired-reference color error.
 
 ## Current limitation
 
@@ -27,13 +27,14 @@ trajectory.
 
 ## Smallest falsifiable test
 
-Overfit 50 pairs for 2k steps, then train RGB one-shot, gray one-shot, and Cold
-gray models on the same 720/80/90 split. Use 128px crops, 8 Cold steps, and a
-50k cap with validation every 5k.
+Overfit 50 pairs for 2k steps, then train the Cold gray model on the fixed
+720/80/90 split. On the same checkpoint and Test 90, compare direct
+`R(gray, T)` against Algorithm 2. Use 128px crops, 8 Cold steps, and a 50k cap
+with validation every 5k.
 
 ## Failure meaning
 
-- Cold does not beat gray one-shot: iteration adds no value.
+- Algorithm 2 does not beat direct reconstruction: iteration adds no value.
 - Both gray methods lose clearly to RGB: the hard gray bottleneck discards
   necessary evidence.
 - Final quality improves but state errors are not monotonic: the path is not an
@@ -46,8 +47,8 @@ Repeat 30k/50k with three seeds, then test a gray-anchor latent Reflow model.
 ## Evaluation
 
 PSNR, SSIM, Delta-E76, direct-vs-Algorithm-2 output, reverse-step monotonicity,
-and qualitative inspection. Use identical architecture and split for the three
-pixel-space models.
+and qualitative inspection. Both outputs must come from the same checkpoint,
+split, crop, and metric preprocessing.
 
 ## Budget and stop rule
 

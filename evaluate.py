@@ -12,7 +12,11 @@ from torch.utils.data import DataLoader
 from gray_cold_diffusion.bridge import GrayBridge
 from gray_cold_diffusion.color import gray_anchor, normalized_lab_to_rgb, rgb_to_normalized_lab
 from gray_cold_diffusion.data import PairedImageDataset
-from gray_cold_diffusion.extended_metrics import evaluate_extended_metrics
+from gray_cold_diffusion.extended_metrics import (
+    create_pyiqa_metrics,
+    evaluate_extended_metrics,
+    save_method_comparison,
+)
 from gray_cold_diffusion.io import save_stage_strip, save_tensor_image, save_trajectory_grid, select_device
 from gray_cold_diffusion.metrics import delta_e76, psnr, ssim, trajectory_monotonic_fraction
 from gray_cold_diffusion.model import RestorationUNet
@@ -62,6 +66,7 @@ def main():
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     totals = {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0, "monotonic": 0.0}
+    direct_totals = {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0} if config["mode"] == "cold_gray" else None
     count = 0
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -83,7 +88,9 @@ def main():
     preview_scale = args.preview_scale or max(1, math.ceil(512 / image_size))
     exported_names = []
     cold_scores = {}
+    direct_scores = {}
     prediction_dir = output / "predictions"
+    direct_prediction_dir = output / "direct_predictions"
     evaluation_reference_dir = output / "references"
     with torch.no_grad():
         for batch in loader:
@@ -94,8 +101,12 @@ def main():
             anchor = gray_anchor(raw_lab)
             t = torch.full((raw.shape[0],), steps, device=device, dtype=torch.long)
             if mode == "cold_gray":
+                direct_lab = model(anchor, t).clamp(-1, 1)
+                direct = normalized_lab_to_rgb(direct_lab)
                 pred_lab, trajectory = bridge.sample(model, anchor, return_trajectory=True)
             else:
+                direct_lab = None
+                direct = None
                 state = anchor if mode == "gray_oneshot" else raw_lab
                 pred_lab = model(state, t).clamp(-1, 1)
                 trajectory = [state, pred_lab]
@@ -108,26 +119,40 @@ def main():
             totals["ssim"] += batch_ssim.sum().item()
             totals["delta_e76"] += batch_delta_e.sum().item()
             totals["monotonic"] += batch_monotonic.sum().item()
+            if direct_totals is not None:
+                batch_direct_psnr = psnr(direct, reference)
+                batch_direct_ssim = ssim(direct, reference)
+                batch_direct_delta_e = delta_e76(direct_lab, target_lab)
+                direct_totals["psnr"] += batch_direct_psnr.sum().item()
+                direct_totals["ssim"] += batch_direct_ssim.sum().item()
+                direct_totals["delta_e76"] += batch_direct_delta_e.sum().item()
             count += raw.shape[0]
             if args.extended_metrics:
                 for image_index, name in enumerate(batch["name"]):
                     save_tensor_image(pred[image_index], prediction_dir / f"{name}.png")
                     save_tensor_image(reference[image_index], evaluation_reference_dir / f"{name}.png")
+                    if direct is not None:
+                        save_tensor_image(direct[image_index], direct_prediction_dir / f"{name}.png")
                     exported_names.append(name)
                     cold_scores[name] = {
                         "delta_e76": float(batch_delta_e[image_index].item()),
                         "trajectory_monotonic": float(batch_monotonic[image_index].item()),
                     }
+                    if direct is not None:
+                        direct_scores[name] = {
+                            "delta_e76": float(batch_direct_delta_e[image_index].item()),
+                        }
             for image_index in range(raw.shape[0]):
                 if preview_saved >= args.preview_count:
                     break
+                stages = [("raw", raw), ("gray", normalized_lab_to_rgb(anchor))]
+                if direct is not None:
+                    stages.extend([("direct", direct), ("Algorithm 2", pred)])
+                else:
+                    stages.append(("prediction", pred))
+                stages.append(("reference", reference))
                 save_stage_strip(
-                    [
-                        ("raw", raw),
-                        ("gray", normalized_lab_to_rgb(anchor)),
-                        ("prediction", pred),
-                        ("reference", reference),
-                    ],
+                    stages,
                     output / f"batch_{preview_saved:03d}.png",
                     image_index=image_index,
                     display_scale=preview_scale,
@@ -141,6 +166,8 @@ def main():
                     )
                 preview_saved += 1
     metrics = {key: value / count for key, value in totals.items()}
+    if direct_totals is not None:
+        metrics["direct"] = {key: value / count for key, value in direct_totals.items()}
     split_path = Path(args.split_file)
     metrics["evaluation"] = {
         "checkpoint": str(checkpoint_path.resolve()),
@@ -153,9 +180,10 @@ def main():
     }
 
     if args.extended_metrics:
-        del model, bridge, raw, reference, raw_lab, target_lab, anchor, pred_lab, trajectory, pred
+        del model, bridge
         if device.type == "cuda":
             torch.cuda.empty_cache()
+        pyiqa_metrics = create_pyiqa_metrics(device)
         metrics["extended"] = evaluate_extended_metrics(
             prediction_dir=prediction_dir,
             reference_dir=evaluation_reference_dir,
@@ -164,7 +192,27 @@ def main():
             device=device,
             eval_size=args.extended_metric_size,
             cold_scores=cold_scores,
+            pyiqa_metrics=pyiqa_metrics,
+            progress_label="algorithm2_metrics",
         )
+        if direct_totals is not None:
+            metrics["direct_extended"] = evaluate_extended_metrics(
+                prediction_dir=direct_prediction_dir,
+                reference_dir=evaluation_reference_dir,
+                names=exported_names,
+                output_csv=output / "direct_metrics.csv",
+                device=device,
+                eval_size=args.extended_metric_size,
+                cold_scores=direct_scores,
+                pyiqa_metrics=pyiqa_metrics,
+                progress_label="direct_metrics",
+            )
+            comparison = save_method_comparison(
+                metrics["direct_extended"]["means"],
+                metrics["extended"]["means"],
+                output / "direct_vs_algorithm2.csv",
+            )
+            metrics["direct_vs_algorithm2"] = comparison
         metrics["evaluation"]["extended_metric_size"] = args.extended_metric_size
     (output / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2))
