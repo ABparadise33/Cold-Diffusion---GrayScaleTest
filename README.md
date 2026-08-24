@@ -141,6 +141,12 @@ git pull
 .venv/bin/pip install -e .
 ```
 
+若舊環境曾出現 `No module named 'pkg_resources'`：
+
+```bash
+.venv/bin/python -m pip install "setuptools<82"
+```
+
 高解析評測（4090 建議 512 crop、batch 1）：
 
 ```bash

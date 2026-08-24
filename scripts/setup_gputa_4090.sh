@@ -28,7 +28,7 @@ fi
 python_bin="$repo_root/.venv/bin/python"
 
 "$python_bin" -c 'import sys; assert (3, 10) <= sys.version_info < (3, 13), "Python 3.10-3.12 is required for this pinned PyTorch build"'
-"$python_bin" -m pip install --upgrade pip setuptools wheel
+"$python_bin" -m pip install --upgrade pip "setuptools<82" wheel
 
 echo "[3/5] PyTorch 2.5.1 + CUDA 12.1"
 if ! "$python_bin" -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)' 2>/dev/null; then
