@@ -33,10 +33,16 @@ python_bin="$repo_root/.venv/bin/python"
 echo "[3/5] PyTorch 2.5.1 + CUDA 12.1"
 if ! "$python_bin" -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)' 2>/dev/null; then
   "$python_bin" -m pip install --upgrade --force-reinstall \
-    "torch==2.5.1" \
+    "torch==2.5.1" "torchvision==0.20.1" \
     --index-url https://download.pytorch.org/whl/cu121
 else
   echo "Reusing the CUDA-enabled PyTorch already installed in .venv."
+fi
+
+if ! "$python_bin" -c 'import torchvision; assert torchvision.__version__.startswith("0.20.1")' 2>/dev/null; then
+  "$python_bin" -m pip install --upgrade --force-reinstall --no-deps \
+    "torchvision==0.20.1" \
+    --index-url https://download.pytorch.org/whl/cu121
 fi
 
 echo "[4/5] Project dependencies"

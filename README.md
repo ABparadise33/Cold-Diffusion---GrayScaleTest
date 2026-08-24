@@ -153,8 +153,12 @@ git pull
   --device cuda \
   --image-size 512 \
   --batch-size 1 \
+  --extended-metrics \
+  --extended-metric-size 256 \
   --output-dir evaluation/cold_gray_50k_512
 ```
+
+第一次執行會下載 LPIPS、MUSIQ、CLIP-IQA 等評測權重；之後會使用快取。
 
 輸出包含：
 
@@ -163,9 +167,23 @@ evaluation/cold_gray_50k_512/
 ├── metrics.json
 ├── training_curves.png
 ├── training_summary.json
+├── extended_metrics.csv  # 90 張逐張結果；最後一列是 __mean__
+├── extended_metrics.md   # 可直接閱讀的平均表
+├── predictions/          # 90 張模型輸出
+├── references/           # 與輸出對齊的 90 張 GT
 ├── batch_000.png          # raw → gray → prediction → reference
 └── trajectory_000.png     # reverse 0/8 → 8/8，由左至右
 ```
+
+`extended_metrics.csv` 包含 FlowIE 原本的 14 項：
+
+- 越高越好：PSNR-Y/RGB、SSIM-Y/RGB、MS-SSIM、MUSIQ、CLIP-IQA、Entropy、MI、UIQM
+- 越低越好：LPIPS、NIQE、KL、DUCD
+- Cold 額外指標：Delta-E76 越低越好；trajectory monotonic 越高越好
+
+目前 Test 90 的檔名與 `Underwater_FlowIE` 舊實驗是 90/90 相同。14 項舊指標固定在
+256×256 計算；Delta-E76 與 monotonic 在 512 crop 計算。若要做嚴格的跨模型表格，
+所有模型仍須使用相同的 crop/resize 流程重新評測。
 
 `training_summary.json` 會根據最近三次 validation 提供：
 

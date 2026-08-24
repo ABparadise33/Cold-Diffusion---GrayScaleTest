@@ -55,6 +55,11 @@ def _tensor_to_pil(image: torch.Tensor) -> Image.Image:
     return Image.fromarray(array)
 
 
+def save_tensor_image(image: torch.Tensor, path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _tensor_to_pil(image).save(path)
+
+
 def save_stage_strip(
     stages: list[tuple[str, torch.Tensor]],
     path: Path,
