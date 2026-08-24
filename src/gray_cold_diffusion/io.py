@@ -6,7 +6,7 @@ import random
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 import torch
 
 from .color import normalized_lab_to_rgb
@@ -55,6 +55,47 @@ def _tensor_to_pil(image: torch.Tensor) -> Image.Image:
     return Image.fromarray(array)
 
 
+def save_stage_strip(
+    stages: list[tuple[str, torch.Tensor]],
+    path: Path,
+    image_index: int = 0,
+    display_scale: int = 1,
+):
+    """Save one sample's stages from left to right without reducing resolution."""
+    if display_scale < 1:
+        raise ValueError("display_scale must be >= 1")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tiles = []
+    for label, images in stages:
+        image = images[image_index] if images.ndim == 4 else images
+        tile = _tensor_to_pil(image)
+        if display_scale > 1:
+            tile = tile.resize(
+                (tile.width * display_scale, tile.height * display_scale),
+                Image.Resampling.BICUBIC,
+            )
+        tiles.append((label, tile))
+
+    font_size = max(16, 5 * display_scale)
+    try:
+        font = ImageFont.load_default(size=font_size)
+    except TypeError:
+        font = ImageFont.load_default()
+    label_h = font_size + 12
+    canvas = Image.new(
+        "RGB",
+        (sum(tile.width for _, tile in tiles), max(tile.height for _, tile in tiles) + label_h),
+        "white",
+    )
+    draw = ImageDraw.Draw(canvas)
+    x = 0
+    for label, tile in tiles:
+        draw.text((x + 6, 5), label, fill="black", font=font)
+        canvas.paste(tile, (x, label_h))
+        x += tile.width
+    canvas.save(path)
+
+
 def save_labeled_grid(rows: list[tuple[str, torch.Tensor]], path: Path, max_images: int = 4):
     """Save rows of BCHW RGB tensors with compact labels."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -71,11 +112,16 @@ def save_labeled_grid(rows: list[tuple[str, torch.Tensor]], path: Path, max_imag
     canvas.save(path)
 
 
-def save_trajectory_grid(trajectory: list[torch.Tensor], path: Path, max_images: int = 2):
-    rows = []
+def save_trajectory_grid(
+    trajectory: list[torch.Tensor],
+    path: Path,
+    image_index: int = 0,
+    display_scale: int = 1,
+):
+    stages = []
     for index, state in enumerate(trajectory):
-        rows.append((f"reverse {index}/{len(trajectory)-1}", normalized_lab_to_rgb(state)))
-    save_labeled_grid(rows, path, max_images=max_images)
+        stages.append((f"reverse {index}/{len(trajectory)-1}", normalized_lab_to_rgb(state)))
+    save_stage_strip(stages, path, image_index=image_index, display_scale=display_scale)
 
 
 def atomic_torch_save(payload: dict, path: Path):

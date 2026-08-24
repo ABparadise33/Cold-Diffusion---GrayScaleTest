@@ -134,6 +134,15 @@ outputs/cold_gray_50k/
 
 ## 評估 checkpoint
 
+更新舊 instance 的評測依賴：
+
+```bash
+git pull
+.venv/bin/pip install -e .
+```
+
+高解析評測（4090 建議 512 crop、batch 1）：
+
 ```bash
 .venv/bin/python evaluate.py \
   --checkpoint outputs/cold_gray_50k/checkpoints/best.pt \
@@ -141,8 +150,30 @@ outputs/cold_gray_50k/
   --reference-dir data/UIEB/reference-890 \
   --split-file splits/uieb_seed42.json \
   --split test \
-  --device cuda
+  --device cuda \
+  --image-size 512 \
+  --batch-size 1 \
+  --output-dir evaluation/cold_gray_50k_512
 ```
+
+輸出包含：
+
+```text
+evaluation/cold_gray_50k_512/
+├── metrics.json
+├── training_curves.png
+├── training_summary.json
+├── batch_000.png          # raw → gray → prediction → reference
+└── trajectory_000.png     # reverse 0/8 → 8/8，由左至右
+```
+
+`training_summary.json` 會根據最近三次 validation 提供：
+
+- `continue_candidate`：PSNR、Delta-E 或 monotonic 仍有實質改善。
+- `plateau_or_regressing`：三次 validation 已停滯或退步，先不要盲目續訓。
+
+這只是續訓提示；仍需同時查看曲線和輸出圖片。比較不同 checkpoint 或 baseline
+時，必須使用相同的 `--image-size`。
 
 概念來源：[Cold Diffusion 論文](https://arxiv.org/abs/2208.09392)與
 [官方實作](https://github.com/arpitbansal297/Cold-Diffusion-Models)。

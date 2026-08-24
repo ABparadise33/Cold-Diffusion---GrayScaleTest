@@ -12,7 +12,7 @@ import torch
 
 from .bridge import GrayBridge
 from .color import gray_anchor, normalized_lab_to_rgb, rgb_to_normalized_lab
-from .io import append_csv, atomic_torch_save, save_labeled_grid, save_trajectory_grid, update_ema
+from .io import append_csv, atomic_torch_save, save_stage_strip, save_trajectory_grid, update_ema
 from .metrics import delta_e76, psnr, ssim, trajectory_monotonic_fraction
 
 
@@ -172,11 +172,16 @@ class Trainer:
         metrics = {key: value / count for key, value in totals.items()}
         if sample is not None:
             raw, gray, direct, pred, reference, trajectory = sample
-            save_labeled_grid(
+            save_stage_strip(
                 [("raw", raw), ("gray anchor", gray), ("direct", direct), ("sampled", pred), ("reference", reference)],
                 self.output / "samples" / f"step_{self.step:06d}.png",
+                display_scale=4,
             )
-            save_trajectory_grid(trajectory, self.output / "trajectories" / f"step_{self.step:06d}.png")
+            save_trajectory_grid(
+                trajectory,
+                self.output / "trajectories" / f"step_{self.step:06d}.png",
+                display_scale=4,
+            )
         return metrics
 
     def train(self):
