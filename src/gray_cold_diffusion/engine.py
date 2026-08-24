@@ -16,6 +16,11 @@ from .io import append_csv, atomic_torch_save, save_labeled_grid, save_trajector
 from .metrics import delta_e76, psnr, ssim, trajectory_monotonic_fraction
 
 
+def _restore_cuda_rng_states(states):
+    """CUDA RNG restoration requires CPU uint8 tensors after checkpoint loading."""
+    torch.cuda.set_rng_state_all([state.cpu() for state in states])
+
+
 class Trainer:
     def __init__(self, model, bridge, train_loader, val_loader, config, device):
         self.model = model.to(device)
@@ -134,7 +139,9 @@ class Trainer:
         if "torch" in rng:
             torch.set_rng_state(rng["torch"].cpu())
         if self.device.type == "cuda" and "cuda" in rng:
-            torch.cuda.set_rng_state_all(rng["cuda"])
+            # map_location=self.device also maps saved RNG tensors to CUDA,
+            # while set_rng_state_all requires CPU torch.ByteTensor values.
+            _restore_cuda_rng_states(rng["cuda"])
         print(f"resumed from step {self.step}: {path}")
 
     @torch.no_grad()
