@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 outputs/
 data/
+*.log
+.cache/
 *.pt
 *.pth
 .DS_Store

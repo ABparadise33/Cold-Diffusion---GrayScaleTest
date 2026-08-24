@@ -205,7 +205,16 @@ class Trainer:
             if self.step % log_every == 0:
                 elapsed = time.time() - start
                 avg_loss = sum(running) / len(running)
-                print(f"step={self.step} loss={avg_loss:.6f} elapsed={elapsed:.1f}s")
+                steps_per_second = len(running) / max(elapsed, 1e-9)
+                eta_hours = (self.max_steps - self.step) / max(steps_per_second, 1e-9) / 3600
+                gpu_memory = ""
+                if self.device.type == "cuda":
+                    peak_gb = torch.cuda.max_memory_allocated(self.device) / 1024**3
+                    gpu_memory = f" peak_vram={peak_gb:.2f}GB"
+                print(
+                    f"step={self.step} loss={avg_loss:.6f} "
+                    f"speed={steps_per_second:.2f}step/s eta={eta_hours:.2f}h{gpu_memory}"
+                )
                 append_csv(self.output / "metrics.csv", {
                     "step": self.step,
                     "train_l1": avg_loss,

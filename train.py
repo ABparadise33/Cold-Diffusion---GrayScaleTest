@@ -48,6 +48,13 @@ def main():
     set_seed(int(config["seed"]))
     device = select_device(args.device)
     print(f"device={device} mode={config['mode']} max_steps={config['training']['max_steps']}")
+    if device.type == "cuda":
+        properties = torch.cuda.get_device_properties(device)
+        print(
+            f"cuda_device={properties.name} "
+            f"vram={properties.total_memory / 1024**3:.1f}GB "
+            f"torch={torch.__version__} cuda_runtime={torch.version.cuda}"
+        )
 
     image_size = int(config["data"]["image_size"])
     train_dataset = PairedImageDataset(args.raw_dir, args.reference_dir, args.split_file, "train", image_size, augment=True)

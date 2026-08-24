@@ -54,3 +54,5 @@ pixel-space models.
 Stop early if validation PSNR/Delta-E76 and trajectory monotonicity do not
 improve across three consecutive 5k evaluations. Continue past 50k only if at
 least one primary metric is still improving and Cold beats gray one-shot.
+The first rented-RTX-4090 run must pass the CUDA/resume smoke test before paid
+training; use the measured step rate rather than a theoretical duration.
