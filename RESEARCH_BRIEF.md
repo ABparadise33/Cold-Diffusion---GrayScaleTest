@@ -48,7 +48,7 @@ Repeat 30k/50k with three seeds, then test a gray-anchor latent Reflow model.
 
 PSNR, SSIM, Delta-E76, direct-vs-Algorithm-2 output, reverse-step monotonicity,
 and qualitative inspection. Both outputs must come from the same checkpoint,
-split, crop, and metric preprocessing.
+split, original-resolution image, and metric preprocessing.
 
 ## Budget and stop rule
 

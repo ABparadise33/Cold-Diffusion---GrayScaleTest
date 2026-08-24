@@ -33,7 +33,13 @@ def main():
     parser.add_argument("--output-dir", default="evaluation")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--image-size", type=int, help="evaluation crop size; defaults to training size")
+    spatial_group = parser.add_mutually_exclusive_group()
+    spatial_group.add_argument("--image-size", type=int, help="square evaluation crop; defaults to training size")
+    spatial_group.add_argument(
+        "--original-size",
+        action="store_true",
+        help="preserve each image's original width, height, and aspect ratio",
+    )
     parser.add_argument("--preview-count", type=int, default=3)
     parser.add_argument("--preview-scale", type=int, help="display-only upscaling; automatic if omitted")
     parser.add_argument("--training-metrics", help="metrics.csv; auto-detected from checkpoint if omitted")
@@ -59,7 +65,9 @@ def main():
     model.load_state_dict(checkpoint["ema"])
     model.eval()
     bridge = GrayBridge(steps).to(device)
-    image_size = args.image_size or int(config["data"]["image_size"])
+    if args.original_size and args.batch_size != 1:
+        parser.error("--original-size requires --batch-size 1 because UIEB image sizes vary")
+    image_size = None if args.original_size else (args.image_size or int(config["data"]["image_size"]))
     dataset = PairedImageDataset(
         args.raw_dir, args.reference_dir, args.split_file, args.split,
         image_size, augment=False,
@@ -85,7 +93,7 @@ def main():
 
     mode = config["mode"]
     preview_saved = 0
-    preview_scale = args.preview_scale or max(1, math.ceil(512 / image_size))
+    preview_scale = args.preview_scale or (1 if image_size is None else max(1, math.ceil(512 / image_size)))
     exported_names = []
     cold_scores = {}
     direct_scores = {}
@@ -111,6 +119,16 @@ def main():
                 pred_lab = model(state, t).clamp(-1, 1)
                 trajectory = [state, pred_lab]
             pred = normalized_lab_to_rgb(pred_lab)
+            if pred.shape[-2:] != raw.shape[-2:]:
+                raise RuntimeError(
+                    f"prediction geometry changed from {tuple(raw.shape[-2:])} "
+                    f"to {tuple(pred.shape[-2:])}"
+                )
+            if direct is not None and direct.shape[-2:] != raw.shape[-2:]:
+                raise RuntimeError(
+                    f"direct geometry changed from {tuple(raw.shape[-2:])} "
+                    f"to {tuple(direct.shape[-2:])}"
+                )
             batch_psnr = psnr(pred, reference)
             batch_ssim = ssim(pred, reference)
             batch_delta_e = delta_e76(pred_lab, target_lab)
@@ -175,6 +193,7 @@ def main():
         "split": args.split,
         "num_images": count,
         "image_size": image_size,
+        "spatial_mode": "original_size" if image_size is None else "square_crop",
         "split_file": str(split_path.resolve()),
         "split_sha256": hashlib.sha256(split_path.read_bytes()).hexdigest(),
     }

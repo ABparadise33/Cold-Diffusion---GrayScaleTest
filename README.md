@@ -147,7 +147,7 @@ git pull
 .venv/bin/python -m pip install "setuptools<82"
 ```
 
-高解析評測（4090 建議 512 crop、batch 1）：
+原始尺寸評測（保留每張影像的寬、高與長寬比）：
 
 ```bash
 .venv/bin/python evaluate.py \
@@ -157,11 +157,11 @@ git pull
   --split-file splits/uieb_seed42.json \
   --split test \
   --device cuda \
-  --image-size 512 \
+  --original-size \
   --batch-size 1 \
   --extended-metrics \
   --extended-metric-size 256 \
-  --output-dir evaluation/cold_gray_50k_512
+  --output-dir evaluation/cold_gray_50k_original
 ```
 
 第一次執行會下載 LPIPS、MUSIQ、CLIP-IQA 等評測權重；之後會使用快取。
@@ -169,7 +169,7 @@ git pull
 輸出包含：
 
 ```text
-evaluation/cold_gray_50k_512/
+evaluation/cold_gray_50k_original/
 ├── metrics.json
 ├── training_curves.png
 ├── training_summary.json
@@ -196,17 +196,18 @@ Direct 與 Algorithm 2 使用同一個 Cold checkpoint，不需要重新訓練�
 - 越低越好：LPIPS、NIQE、KL、DUCD
 - Cold 額外指標：Delta-E76 越低越好；trajectory monotonic 越高越好
 
-目前 Test 90 的檔名與 `Underwater_FlowIE` 舊實驗是 90/90 相同。14 項舊指標固定在
-256×256 計算；Delta-E76 與 monotonic 在 512 crop 計算。若要做嚴格的跨模型表格，
-所有模型仍須使用相同的 crop/resize 流程重新評測。
+目前 Test 90 的檔名與 `Underwater_FlowIE` 舊實驗是 90/90 相同。`predictions/`、
+`direct_predictions/` 與 `references/` 的 PNG 都維持原始尺寸，不會裁切或拉伸成
+正方形。14 項舊指標只在記憶體內暫時縮放至 256×256，以延續 FlowIE 的舊評測
+定義；Delta-E76 與 monotonic 使用完整原始尺寸。
 
 `training_summary.json` 會根據最近三次 validation 提供：
 
 - `continue_candidate`：PSNR、Delta-E 或 monotonic 仍有實質改善。
 - `plateau_or_regressing`：三次 validation 已停滯或退步，先不要盲目續訓。
 
-這只是續訓提示；仍需同時查看曲線和輸出圖片。比較不同 checkpoint 或 baseline
-時，必須使用相同的 `--image-size`。
+這只是續訓提示；仍需同時查看曲線和輸出圖片。跨模型比較時，統一使用
+`--original-size --batch-size 1`。
 
 概念來源：[Cold Diffusion 論文](https://arxiv.org/abs/2208.09392)與
 [官方實作](https://github.com/arpitbansal297/Cold-Diffusion-Models)。

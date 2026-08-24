@@ -22,13 +22,15 @@ class PairedImageDataset(Dataset):
         reference_dir: str | Path,
         split_file: str | Path,
         split: str,
-        image_size: int = 128,
+        image_size: int | None = 128,
         augment: bool = False,
     ):
         self.raw_dir = Path(raw_dir)
         self.reference_dir = Path(reference_dir)
-        self.image_size = int(image_size)
+        self.image_size = None if image_size is None else int(image_size)
         self.augment = augment
+        if self.image_size is None and self.augment:
+            raise ValueError("original-size loading does not support random crop augmentation")
         with Path(split_file).open("r", encoding="utf-8") as handle:
             manifest = json.load(handle)
         if split not in manifest:
@@ -46,6 +48,8 @@ class PairedImageDataset(Dataset):
         return self.raw_dir / item["raw"], self.reference_dir / item["reference"]
 
     def _resize_if_needed(self, raw: Image.Image, reference: Image.Image):
+        if self.image_size is None:
+            return raw, reference
         width, height = raw.size
         if min(width, height) >= self.image_size:
             return raw, reference
@@ -65,6 +69,12 @@ class PairedImageDataset(Dataset):
         if raw.size != reference.size:
             raise ValueError(f"unaligned pair: {raw_path.name} {raw.size} vs {reference_path.name} {reference.size}")
         raw, reference = self._resize_if_needed(raw, reference)
+        if self.image_size is None:
+            return {
+                "raw": _to_tensor(raw),
+                "reference": _to_tensor(reference),
+                "name": raw_path.stem,
+            }
         width, height = raw.size
         if self.augment:
             left = random.randint(0, width - self.image_size)
