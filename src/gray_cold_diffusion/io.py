@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import torch
 
-from .color import normalized_lab_to_rgb
+from .color import denormalize_rgb, normalized_lab_to_rgb
 
 
 def select_device(requested: str = "auto") -> torch.device:
@@ -122,10 +122,14 @@ def save_trajectory_grid(
     path: Path,
     image_index: int = 0,
     display_scale: int = 1,
+    color_space: str = "lab",
 ):
+    if color_space not in {"lab", "rgb"}:
+        raise ValueError(f"unsupported trajectory color space: {color_space}")
+    to_rgb = normalized_lab_to_rgb if color_space == "lab" else denormalize_rgb
     stages = []
     for index, state in enumerate(trajectory):
-        stages.append((f"reverse {index}/{len(trajectory)-1}", normalized_lab_to_rgb(state)))
+        stages.append((f"reverse {index}/{len(trajectory)-1}", to_rgb(state)))
     save_stage_strip(stages, path, image_index=image_index, display_scale=display_scale)
 
 

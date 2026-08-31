@@ -9,6 +9,11 @@ from PIL import Image
 import torch
 from torch.utils.data import Dataset
 
+from .color import adjust_saturation_from_channel_mean
+
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+
 
 def _to_tensor(image: Image.Image) -> torch.Tensor:
     array = np.asarray(image, dtype=np.float32) / 255.0
@@ -98,3 +103,68 @@ def seed_worker(worker_id: int):
     seed = torch.initial_seed() % (2**32)
     random.seed(seed)
     np.random.seed(seed)
+
+
+class NaturalImageDataset(Dataset):
+    """Single-image colorization data with an on-the-fly saturation target."""
+
+    def __init__(
+        self,
+        image_dir: str | Path,
+        image_size: int = 128,
+        saturation_factor: float = 1.0,
+        augment: bool = False,
+    ):
+        self.image_dir = Path(image_dir)
+        self.image_size = int(image_size)
+        self.saturation_factor = float(saturation_factor)
+        self.augment = bool(augment)
+        if self.image_size < 1:
+            raise ValueError("image_size must be >= 1")
+        if self.saturation_factor < 0:
+            raise ValueError("saturation_factor must be >= 0")
+        if not self.image_dir.is_dir():
+            raise FileNotFoundError(f"missing natural-image directory: {self.image_dir}")
+        self.items = sorted(
+            path
+            for path in self.image_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+        )
+        if not self.items:
+            raise ValueError(f"no supported images found in {self.image_dir}")
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def _resize_if_needed(self, image: Image.Image) -> Image.Image:
+        width, height = image.size
+        if min(width, height) >= self.image_size:
+            return image
+        scale = self.image_size / min(width, height)
+        size = (round(width * scale), round(height * scale))
+        return image.resize(size, Image.Resampling.BICUBIC)
+
+    def __getitem__(self, index: int):
+        path = self.items[index]
+        with Image.open(path) as image:
+            image = self._resize_if_needed(image.convert("RGB"))
+        width, height = image.size
+        if self.augment:
+            left = random.randint(0, width - self.image_size)
+            top = random.randint(0, height - self.image_size)
+        else:
+            left = (width - self.image_size) // 2
+            top = (height - self.image_size) // 2
+        box = (left, top, left + self.image_size, top + self.image_size)
+        image = image.crop(box)
+        if self.augment and random.random() < 0.5:
+            image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        source = _to_tensor(image)
+        target = adjust_saturation_from_channel_mean(
+            source.unsqueeze(0), self.saturation_factor
+        ).squeeze(0)
+        return {
+            "raw": source,
+            "reference": target,
+            "name": path.stem,
+        }

@@ -11,7 +11,14 @@ import numpy as np
 import torch
 
 from .bridge import GrayBridge
-from .color import gray_anchor, normalized_lab_to_rgb, rgb_to_normalized_lab
+from .color import (
+    denormalize_rgb,
+    gray_anchor,
+    normalize_rgb,
+    normalized_lab_to_rgb,
+    rgb_channel_mean_gray,
+    rgb_to_normalized_lab,
+)
 from .io import append_csv, atomic_torch_save, save_stage_strip, save_trajectory_grid, update_ema
 from .metrics import delta_e76, psnr, ssim, trajectory_monotonic_fraction
 
@@ -31,6 +38,7 @@ class Trainer:
         self.config = config
         self.device = device
         self.mode = config["mode"]
+        self.color_space = "rgb" if self.mode == "natural_rgb_colorization" else "lab"
         self.output = Path(config["output_dir"])
         self.output.mkdir(parents=True, exist_ok=True)
         train_cfg = config["training"]
@@ -61,33 +69,47 @@ class Trainer:
     def _prepare(self, batch):
         raw_rgb = batch["raw"].to(self.device, non_blocking=True)
         reference_rgb = batch["reference"].to(self.device, non_blocking=True)
+        if self.color_space == "rgb":
+            raw_state = normalize_rgb(raw_rgb)
+            reference_state = normalize_rgb(reference_rgb)
+            # Keep the grayscale endpoint identical for the 1.0 and 1.5 runs;
+            # only the color target changes between the two controls.
+            anchor = rgb_channel_mean_gray(raw_state)
+            return raw_rgb, reference_rgb, raw_state, reference_state, anchor
         raw_lab = rgb_to_normalized_lab(raw_rgb)
         reference_lab = rgb_to_normalized_lab(reference_rgb)
         return raw_rgb, reference_rgb, raw_lab, reference_lab, gray_anchor(raw_lab)
 
-    def _training_pair(self, raw_lab, reference_lab, anchor):
-        batch = reference_lab.shape[0]
-        if self.mode == "cold_gray":
+    def _state_to_rgb(self, state):
+        if self.color_space == "rgb":
+            return denormalize_rgb(state)
+        return normalized_lab_to_rgb(state)
+
+    def _state_to_lab(self, state):
+        return rgb_to_normalized_lab(self._state_to_rgb(state))
+
+    def _training_pair(self, raw_state, reference_state, anchor):
+        batch = reference_state.shape[0]
+        if self.mode in {"cold_gray", "natural_rgb_colorization"}:
             t = torch.randint(1, self.bridge.steps + 1, (batch,), device=self.device)
-            model_input = self.bridge.degrade(reference_lab, anchor, t)
+            model_input = self.bridge.degrade(reference_state, anchor, t)
         elif self.mode == "gray_oneshot":
             t = torch.full((batch,), self.bridge.steps, device=self.device, dtype=torch.long)
             model_input = anchor
         elif self.mode == "rgb_oneshot":
             t = torch.full((batch,), self.bridge.steps, device=self.device, dtype=torch.long)
-            model_input = raw_lab
+            model_input = raw_state
         else:
             raise ValueError(f"unsupported mode: {self.mode}")
-        return model_input, reference_lab, t
+        return model_input, reference_state, t
 
     @torch.no_grad()
-    def predict(self, model, raw_lab, return_trajectory=False):
-        anchor = gray_anchor(raw_lab)
-        batch = raw_lab.shape[0]
+    def predict(self, model, raw_state, anchor, return_trajectory=False):
+        batch = raw_state.shape[0]
         full_t = torch.full((batch,), self.bridge.steps, device=self.device, dtype=torch.long)
-        if self.mode == "cold_gray":
+        if self.mode in {"cold_gray", "natural_rgb_colorization"}:
             return self.bridge.sample(model, anchor, return_trajectory=return_trajectory)
-        model_input = anchor if self.mode == "gray_oneshot" else raw_lab
+        model_input = anchor if self.mode == "gray_oneshot" else raw_state
         pred = model(model_input, full_t).clamp(-1, 1)
         return (pred, [model_input, pred]) if return_trajectory else pred
 
@@ -124,6 +146,14 @@ class Trainer:
         for key in ("mode", "model", "diffusion"):
             if key in saved_config and saved_config[key] != self.config[key]:
                 raise ValueError(f"resume config mismatch for {key}: {saved_config[key]!r} != {self.config[key]!r}")
+        if self.mode == "natural_rgb_colorization":
+            saved_factor = float(saved_config.get("data", {}).get("saturation_factor", 1.0))
+            current_factor = float(self.config.get("data", {}).get("saturation_factor", 1.0))
+            if saved_factor != current_factor:
+                raise ValueError(
+                    "resume saturation mismatch: "
+                    f"{saved_factor:g} != {current_factor:g}"
+                )
         self.model.load_state_dict(checkpoint["model"])
         self.ema.load_state_dict(checkpoint["ema"])
         self.optimizer.load_state_dict(checkpoint["optimizer"])
@@ -154,19 +184,33 @@ class Trainer:
         for batch_index, batch in enumerate(self.val_loader):
             if batch_index >= max_batches:
                 break
-            raw_rgb, reference_rgb, raw_lab, reference_lab, anchor = self._prepare(batch)
-            pred_lab, trajectory = self.predict(self.ema, raw_lab, return_trajectory=True)
-            pred_rgb = normalized_lab_to_rgb(pred_lab)
+            raw_rgb, reference_rgb, raw_state, reference_state, anchor = self._prepare(batch)
+            pred_state, trajectory = self.predict(
+                self.ema, raw_state, anchor, return_trajectory=True
+            )
+            pred_rgb = self._state_to_rgb(pred_state)
+            pred_lab = rgb_to_normalized_lab(pred_rgb)
+            reference_lab = rgb_to_normalized_lab(reference_rgb)
+            trajectory_lab = [self._state_to_lab(state) for state in trajectory]
             batch_size = pred_rgb.shape[0]
             totals["psnr"] += psnr(pred_rgb, reference_rgb).sum().item()
             totals["ssim"] += ssim(pred_rgb, reference_rgb).sum().item()
             totals["delta_e76"] += delta_e76(pred_lab, reference_lab).sum().item()
-            totals["monotonic"] += trajectory_monotonic_fraction(trajectory, reference_lab).sum().item()
+            totals["monotonic"] += trajectory_monotonic_fraction(
+                trajectory_lab, reference_lab
+            ).sum().item()
             count += batch_size
             if sample is None:
                 full_t = torch.full((batch_size,), self.bridge.steps, device=self.device, dtype=torch.long)
-                direct_lab = self.ema(anchor, full_t).clamp(-1, 1)
-                sample = (raw_rgb, normalized_lab_to_rgb(anchor), normalized_lab_to_rgb(direct_lab), pred_rgb, reference_rgb, trajectory)
+                direct_state = self.ema(anchor, full_t).clamp(-1, 1)
+                sample = (
+                    raw_rgb,
+                    self._state_to_rgb(anchor),
+                    self._state_to_rgb(direct_state),
+                    pred_rgb,
+                    reference_rgb,
+                    trajectory,
+                )
         if count == 0:
             raise RuntimeError("validation loader produced no samples")
         metrics = {key: value / count for key, value in totals.items()}
@@ -181,6 +225,7 @@ class Trainer:
                 trajectory,
                 self.output / "trajectories" / f"step_{self.step:06d}.png",
                 display_scale=4,
+                color_space=self.color_space,
             )
         return metrics
 
@@ -199,8 +244,10 @@ class Trainer:
             step_losses = []
             for _ in range(self.grad_accum):
                 batch = self._next_batch()
-                _, _, raw_lab, reference_lab, anchor = self._prepare(batch)
-                model_input, target, t = self._training_pair(raw_lab, reference_lab, anchor)
+                _, _, raw_state, reference_state, anchor = self._prepare(batch)
+                model_input, target, t = self._training_pair(
+                    raw_state, reference_state, anchor
+                )
                 with self._autocast():
                     prediction = self.model(model_input, t)
                     loss = (prediction - target).abs().mean()

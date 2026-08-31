@@ -8,6 +8,28 @@
 模型使用 UIEB 成對影像，並在 Lab 色彩空間建立
 `reference -> (L_raw, 0, 0)` 的退化路徑。
 
+## 新實驗：DIV2K natural-image color prior
+
+這個實驗不取代原本的 UIEB/Lab 實驗。它新增獨立的
+`natural_rgb_colorization` 模式，測試只用自然影像學到的色彩 prior 能否轉移到
+水下影像。
+
+| Config | Training target | Output |
+|---|---|---|
+| `configs/div2k_rgb_sat1_50k.yaml` | DIV2K 原始色彩，saturation 1.0 | `outputs/div2k_rgb_sat1_50k/` |
+| `configs/div2k_rgb_sat1_5_50k.yaml` | DIV2K saturation 1.5 | `outputs/div2k_rgb_sat1_5_50k/` |
+
+1.5 倍不是 HSV 濾鏡，也不會改寫硬碟上的 PNG。每次載入 crop 後即時計算：
+
+```text
+g = (R + G + B) / 3
+target = clip(g + saturation_factor * (RGB - g), 0, 1)
+```
+
+1.0 是原圖；1.5 將 RGB channels 離灰階中心的距離放大 50%。超出 sRGB
+範圍的值會 clipping。兩組使用相同原圖、crop、seed、grayscale input 與模型；
+Cold endpoint 固定使用未修改原圖的 `g`，只有 target chroma 不同。
+
 ## GPUTA RTX 4090：從 instance 終端機開始
 
 以下假設 instance 已經能執行 `nvidia-smi`。不需要下載 Stable Diffusion、SAM
@@ -56,6 +78,30 @@ splits/uieb_seed42.json    # train 720 / val 80 / test 90
 UIEB 限學術、非商業用途。原始下載入口與使用條款請見
 [UIEB 官方頁面](https://li-chongyi.github.io/proj_benchmark.html)。
 
+### 3B. 下載 DIV2K HR 並驗證
+
+只下載本實驗需要的官方 Train HR 800 張與 Validation HR 100 張：
+
+```bash
+.venv/bin/python tools/prepare_div2k.py --delete-archives
+```
+
+下載可續傳。ZIP 只會在成功解壓及驗證後，因 `--delete-archives` 被刪除；若要
+保留 ZIP，移除該參數。完成後：
+
+```text
+data/DIV2K/DIV2K_train_HR/   # 0001.png ... 0800.png
+data/DIV2K/DIV2K_valid_HR/   # 0801.png ... 0900.png
+```
+
+若已手動下載並解壓，可只驗證現有資料：
+
+```bash
+.venv/bin/python tools/prepare_div2k.py \
+  --data-root /path/to/DIV2K \
+  --skip-download
+```
+
 ### 4. 先跑 CUDA smoke test
 
 ```bash
@@ -98,6 +144,51 @@ bash scripts/train_4090.sh --resume auto --max-steps 100000
 ```
 
 `latest.pt` 包含 model、EMA、optimizer、AMP scaler、step 與 RNG state。
+
+## DIV2K saturation 1.0 / 1.5 訓練
+
+共同設定：128×128 random crop、T=20、seed 42、50k steps、每 5k validation 與
+checkpoint。4090 預設 physical/effective batch 都是 16。
+
+先跑 1.0 control，再跑 1.5；不要在同一張 GPU 同時執行兩組：
+
+```bash
+bash scripts/train_div2k_4090.sh 1.0
+bash scripts/train_div2k_4090.sh 1.5
+```
+
+續訓到 100k：
+
+```bash
+bash scripts/train_div2k_4090.sh 1.0 --resume auto --max-steps 100000
+bash scripts/train_div2k_4090.sh 1.5 --resume auto --max-steps 100000
+```
+
+記憶體不足時維持 effective batch 16：
+
+```bash
+DIV2K_BATCH_SIZE=8 DIV2K_GRAD_ACCUM=2 \
+  bash scripts/train_div2k_4090.sh 1.0
+```
+
+訓練後使用相同 UIEB seed-42 Test 90 評測。UIEB reference 只參與評測，不會進入
+模型 input：
+
+```bash
+.venv/bin/python evaluate.py \
+  --checkpoint outputs/div2k_rgb_sat1_50k/checkpoints/best.pt \
+  --raw-dir data/UIEB/raw-890 \
+  --reference-dir data/UIEB/reference-890 \
+  --split-file splits/uieb_seed42.json \
+  --split test \
+  --device cuda \
+  --original-size \
+  --batch-size 1 \
+  --output-dir evaluation/div2k_rgb_sat1_uieb
+```
+
+評測 1.5 時，把 checkpoint/output 名稱改成 `div2k_rgb_sat1_5_50k`。Trajectory
+會由左到右輸出 T=20 的完整 reverse process。
 
 ## 記憶體不足時
 

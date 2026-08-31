@@ -2,8 +2,9 @@ import json
 
 import numpy as np
 from PIL import Image
+import torch
 
-from gray_cold_diffusion.data import PairedImageDataset
+from gray_cold_diffusion.data import NaturalImageDataset, PairedImageDataset
 
 
 def _write_pair(root, name, size):
@@ -49,3 +50,27 @@ def test_square_mode_still_center_crops(tmp_path):
     )
 
     assert dataset[0]["raw"].shape == (3, 32, 32)
+
+
+def test_natural_dataset_generates_saturation_target_without_modifying_source(tmp_path):
+    image_dir = tmp_path / "natural"
+    image_dir.mkdir()
+    array = np.zeros((40, 48, 3), dtype=np.uint8)
+    array[..., 0] = 90
+    array[..., 1] = 120
+    array[..., 2] = 150
+    Image.fromarray(array).save(image_dir / "sample.png")
+
+    original = NaturalImageDataset(
+        image_dir, image_size=32, saturation_factor=1.0, augment=False
+    )[0]
+    stronger = NaturalImageDataset(
+        image_dir, image_size=32, saturation_factor=1.5, augment=False
+    )[0]
+
+    assert torch.allclose(original["raw"], original["reference"])
+    original_chroma = (original["reference"] - original["reference"].mean(0)).abs().mean()
+    stronger_chroma = (stronger["reference"] - stronger["reference"].mean(0)).abs().mean()
+    assert stronger_chroma > original_chroma
+    with Image.open(image_dir / "sample.png") as source:
+        assert np.asarray(source)[0, 0].tolist() == [90, 120, 150]

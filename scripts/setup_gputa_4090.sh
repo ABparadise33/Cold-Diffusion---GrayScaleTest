@@ -53,4 +53,4 @@ echo "[5/5] CUDA and unit tests"
 "$python_bin" -m pytest -q
 
 echo "ALL CHECKS PASSED"
-echo "Next: .venv/bin/python tools/prepare_uieb.py"
+echo "Next: prepare UIEB or run .venv/bin/python tools/prepare_div2k.py --delete-archives"

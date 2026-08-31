@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 import yaml
 
 from gray_cold_diffusion.bridge import GrayBridge
-from gray_cold_diffusion.data import PairedImageDataset, seed_worker
+from gray_cold_diffusion.data import NaturalImageDataset, PairedImageDataset, seed_worker
 from gray_cold_diffusion.engine import Trainer
 from gray_cold_diffusion.io import select_device, set_seed
 from gray_cold_diffusion.model import RestorationUNet
@@ -17,9 +17,11 @@ from gray_cold_diffusion.model import RestorationUNet
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
-    parser.add_argument("--raw-dir", required=True)
-    parser.add_argument("--reference-dir", required=True)
-    parser.add_argument("--split-file", required=True)
+    parser.add_argument("--raw-dir")
+    parser.add_argument("--reference-dir")
+    parser.add_argument("--split-file")
+    parser.add_argument("--train-dir", help="single-image training directory for natural colorization")
+    parser.add_argument("--val-dir", help="single-image validation directory for natural colorization")
     parser.add_argument("--output-dir")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--resume", nargs="?", const="auto")
@@ -57,8 +59,39 @@ def main():
         )
 
     image_size = int(config["data"]["image_size"])
-    train_dataset = PairedImageDataset(args.raw_dir, args.reference_dir, args.split_file, "train", image_size, augment=True)
-    val_dataset = PairedImageDataset(args.raw_dir, args.reference_dir, args.split_file, "val", image_size, augment=False)
+    if config["mode"] == "natural_rgb_colorization":
+        if not args.train_dir or not args.val_dir:
+            raise SystemExit(
+                "ERROR: natural_rgb_colorization requires --train-dir and --val-dir"
+            )
+        saturation_factor = float(config["data"].get("saturation_factor", 1.0))
+        train_dataset = NaturalImageDataset(
+            args.train_dir,
+            image_size,
+            saturation_factor=saturation_factor,
+            augment=True,
+        )
+        val_dataset = NaturalImageDataset(
+            args.val_dir,
+            image_size,
+            saturation_factor=saturation_factor,
+            augment=False,
+        )
+        print(
+            f"natural_data train={len(train_dataset)} val={len(val_dataset)} "
+            f"saturation_factor={saturation_factor:g}"
+        )
+    else:
+        if not args.raw_dir or not args.reference_dir or not args.split_file:
+            raise SystemExit(
+                "ERROR: paired modes require --raw-dir, --reference-dir, and --split-file"
+            )
+        train_dataset = PairedImageDataset(
+            args.raw_dir, args.reference_dir, args.split_file, "train", image_size, augment=True
+        )
+        val_dataset = PairedImageDataset(
+            args.raw_dir, args.reference_dir, args.split_file, "val", image_size, augment=False
+        )
     generator = torch.Generator().manual_seed(int(config["seed"]))
     loader_args = dict(
         batch_size=int(config["training"]["batch_size"]),

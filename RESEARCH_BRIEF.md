@@ -57,3 +57,45 @@ improve across three consecutive 5k evaluations. Continue past 50k only if at
 least one primary metric is still improving and Cold beats gray one-shot.
 The first rented-RTX-4090 run must pass the CUDA/resume smoke test before paid
 training; use the measured step rate rather than a theoretical duration.
+
+## Natural-image color-prior ablation (DIV2K)
+
+### Question and motivation
+
+Does a colorization model trained only on high-quality natural images transfer
+a useful, ordered color prior to out-of-domain underwater photographs? Does a
+stronger training-target saturation improve that transfer, or only produce
+over-colorization?
+
+### Hypothesis
+
+A DIV2K model trained with saturation factor 1.5 will recover more chroma than
+the factor-1.0 control, but it counts as an improvement only if paired UIEB
+Delta-E76/LPIPS also improve and the reverse path remains mostly monotonic.
+
+### Current limitation and leverage
+
+The first pilot mixes paired UIEB supervision with a custom Lab bridge. The new
+ablation removes both choices: DIV2K supplies unpaired high-resolution natural
+images, and the forward path uses the paper-style RGB channel-mean grayscale
+anchor. This isolates the learned natural-image color prior.
+
+### Smallest falsifiable test
+
+Train two otherwise identical 50k-step models on DIV2K train HR with 128px
+random crops, 20 Cold steps, seed 42, and saturation factors 1.0 and 1.5. The
+saturation transform expands each RGB pixel away from its channel mean:
+`clip(gray + factor * (rgb - gray), 0, 1)`. Validate on DIV2K validation HR and
+evaluate both checkpoints on the unchanged UIEB seed-42 Test 90. Both runs use
+the same grayscale endpoint computed from the unmodified image; only the color
+target changes.
+
+### Failure meaning, evaluation, and stop rule
+
+- Higher saturation alone, with worse Delta-E76/LPIPS or obvious wrong colors,
+  is hallucination rather than restoration.
+- Non-monotonic UIEB trajectories reject the interpretation of middle states as
+  ordered restoration strength, even if the last image looks vivid.
+- Stop a run after three consecutive 5k validations without improvement. Do not
+  scale beyond DIV2K until factor 1.5 beats factor 1.0 on paired color/perceptual
+  metrics without unacceptable clipping or qualitative color errors.

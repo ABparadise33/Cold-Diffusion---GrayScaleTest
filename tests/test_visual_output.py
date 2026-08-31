@@ -24,3 +24,14 @@ def test_stage_and_trajectory_strips_are_horizontal(tmp_path: Path):
     with Image.open(trajectory_path) as trajectory:
         assert trajectory.width == 9 * 16 * 2
         assert trajectory.width > trajectory.height
+
+    rgb_trajectory_path = tmp_path / "rgb_trajectory.png"
+    rgb_states = [torch.rand(1, 3, 12, 16) * 2 - 1 for _ in range(5)]
+    save_trajectory_grid(
+        rgb_states,
+        rgb_trajectory_path,
+        display_scale=2,
+        color_space="rgb",
+    )
+    with Image.open(rgb_trajectory_path) as trajectory:
+        assert trajectory.width == 5 * 16 * 2

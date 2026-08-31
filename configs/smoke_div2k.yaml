@@ -1,0 +1,30 @@
+experiment: smoke_div2k
+mode: natural_rgb_colorization
+seed: 7
+output_dir: outputs/smoke_div2k
+
+data:
+  image_size: 32
+  num_workers: 0
+  saturation_factor: 1.5
+
+model:
+  base_channels: 8
+  channel_mults: [1, 2]
+  dropout: 0.0
+
+diffusion:
+  steps: 2
+
+training:
+  max_steps: 2
+  batch_size: 2
+  grad_accum: 1
+  learning_rate: 0.0001
+  ema_decay: 0.995
+  ema_update_every: 1
+  amp: false
+  log_every: 1
+  validate_every: 1
+  save_every: 1
+  max_val_batches: 1

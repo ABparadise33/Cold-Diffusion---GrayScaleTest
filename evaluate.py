@@ -10,7 +10,14 @@ import torch
 from torch.utils.data import DataLoader
 
 from gray_cold_diffusion.bridge import GrayBridge
-from gray_cold_diffusion.color import gray_anchor, normalized_lab_to_rgb, rgb_to_normalized_lab
+from gray_cold_diffusion.color import (
+    denormalize_rgb,
+    gray_anchor,
+    normalize_rgb,
+    normalized_lab_to_rgb,
+    rgb_channel_mean_gray,
+    rgb_to_normalized_lab,
+)
 from gray_cold_diffusion.data import PairedImageDataset
 from gray_cold_diffusion.extended_metrics import (
     create_pyiqa_metrics,
@@ -74,7 +81,12 @@ def main():
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     totals = {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0, "monotonic": 0.0}
-    direct_totals = {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0} if config["mode"] == "cold_gray" else None
+    iterative_modes = {"cold_gray", "natural_rgb_colorization"}
+    direct_totals = (
+        {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0}
+        if config["mode"] in iterative_modes
+        else None
+    )
     count = 0
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -104,21 +116,33 @@ def main():
         for batch in loader:
             raw = batch["raw"].to(device)
             reference = batch["reference"].to(device)
-            raw_lab = rgb_to_normalized_lab(raw)
             target_lab = rgb_to_normalized_lab(reference)
-            anchor = gray_anchor(raw_lab)
-            t = torch.full((raw.shape[0],), steps, device=device, dtype=torch.long)
-            if mode == "cold_gray":
-                direct_lab = model(anchor, t).clamp(-1, 1)
-                direct = normalized_lab_to_rgb(direct_lab)
-                pred_lab, trajectory = bridge.sample(model, anchor, return_trajectory=True)
+            if mode == "natural_rgb_colorization":
+                raw_state = normalize_rgb(raw)
+                anchor = rgb_channel_mean_gray(raw_state)
+                state_to_rgb = denormalize_rgb
+                trajectory_color_space = "rgb"
             else:
-                direct_lab = None
+                raw_state = rgb_to_normalized_lab(raw)
+                anchor = gray_anchor(raw_state)
+                state_to_rgb = normalized_lab_to_rgb
+                trajectory_color_space = "lab"
+            t = torch.full((raw.shape[0],), steps, device=device, dtype=torch.long)
+            if mode in iterative_modes:
+                direct_state = model(anchor, t).clamp(-1, 1)
+                direct = state_to_rgb(direct_state)
+                pred_state, trajectory = bridge.sample(
+                    model, anchor, return_trajectory=True
+                )
+            else:
+                direct_state = None
                 direct = None
-                state = anchor if mode == "gray_oneshot" else raw_lab
-                pred_lab = model(state, t).clamp(-1, 1)
-                trajectory = [state, pred_lab]
-            pred = normalized_lab_to_rgb(pred_lab)
+                state = anchor if mode == "gray_oneshot" else raw_state
+                pred_state = model(state, t).clamp(-1, 1)
+                trajectory = [state, pred_state]
+            pred = state_to_rgb(pred_state)
+            pred_lab = rgb_to_normalized_lab(pred)
+            trajectory_lab = [rgb_to_normalized_lab(state_to_rgb(state)) for state in trajectory]
             if pred.shape[-2:] != raw.shape[-2:]:
                 raise RuntimeError(
                     f"prediction geometry changed from {tuple(raw.shape[-2:])} "
@@ -132,7 +156,7 @@ def main():
             batch_psnr = psnr(pred, reference)
             batch_ssim = ssim(pred, reference)
             batch_delta_e = delta_e76(pred_lab, target_lab)
-            batch_monotonic = trajectory_monotonic_fraction(trajectory, target_lab)
+            batch_monotonic = trajectory_monotonic_fraction(trajectory_lab, target_lab)
             totals["psnr"] += batch_psnr.sum().item()
             totals["ssim"] += batch_ssim.sum().item()
             totals["delta_e76"] += batch_delta_e.sum().item()
@@ -140,6 +164,7 @@ def main():
             if direct_totals is not None:
                 batch_direct_psnr = psnr(direct, reference)
                 batch_direct_ssim = ssim(direct, reference)
+                direct_lab = rgb_to_normalized_lab(direct)
                 batch_direct_delta_e = delta_e76(direct_lab, target_lab)
                 direct_totals["psnr"] += batch_direct_psnr.sum().item()
                 direct_totals["ssim"] += batch_direct_ssim.sum().item()
@@ -163,7 +188,7 @@ def main():
             for image_index in range(raw.shape[0]):
                 if preview_saved >= args.preview_count:
                     break
-                stages = [("raw", raw), ("gray", normalized_lab_to_rgb(anchor))]
+                stages = [("raw", raw), ("gray", state_to_rgb(anchor))]
                 if direct is not None:
                     stages.extend([("direct", direct), ("Algorithm 2", pred)])
                 else:
@@ -175,12 +200,13 @@ def main():
                     image_index=image_index,
                     display_scale=preview_scale,
                 )
-                if mode == "cold_gray":
+                if mode in iterative_modes:
                     save_trajectory_grid(
                         trajectory,
                         output / f"trajectory_{preview_saved:03d}.png",
                         image_index=image_index,
                         display_scale=preview_scale,
+                        color_space=trajectory_color_space,
                     )
                 preview_saved += 1
     metrics = {key: value / count for key, value in totals.items()}
@@ -197,6 +223,10 @@ def main():
         "split_file": str(split_path.resolve()),
         "split_sha256": hashlib.sha256(split_path.read_bytes()).hexdigest(),
     }
+    if mode == "natural_rgb_colorization":
+        metrics["evaluation"]["training_saturation_factor"] = float(
+            config.get("data", {}).get("saturation_factor", 1.0)
+        )
 
     if args.extended_metrics:
         del model, bridge

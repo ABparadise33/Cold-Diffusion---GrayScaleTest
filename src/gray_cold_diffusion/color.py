@@ -7,6 +7,35 @@ def _matrix(values: list[list[float]], ref: torch.Tensor) -> torch.Tensor:
     return torch.tensor(values, device=ref.device, dtype=ref.dtype)
 
 
+def normalize_rgb(rgb: torch.Tensor) -> torch.Tensor:
+    """Map RGB [0,1] to the model range [-1,1]."""
+    return rgb * 2.0 - 1.0
+
+
+def denormalize_rgb(rgb: torch.Tensor) -> torch.Tensor:
+    """Map model RGB [-1,1] back to display RGB [0,1]."""
+    return ((rgb + 1.0) * 0.5).clamp(0.0, 1.0)
+
+
+def rgb_channel_mean_gray(rgb: torch.Tensor) -> torch.Tensor:
+    """Paper-style grayscale: repeat the per-pixel mean of R, G, and B."""
+    gray = rgb.mean(dim=1, keepdim=True)
+    return gray.expand_as(rgb)
+
+
+def adjust_saturation_from_channel_mean(rgb: torch.Tensor, factor: float) -> torch.Tensor:
+    """Expand RGB chroma around the same channel-mean gray axis used by the bridge.
+
+    factor=0 is grayscale, factor=1 is the unmodified image, and factor=1.5
+    increases each channel's distance from gray by 50%. Values outside the sRGB
+    gamut are clipped to [0,1].
+    """
+    if factor < 0:
+        raise ValueError("saturation factor must be >= 0")
+    gray = rgb_channel_mean_gray(rgb)
+    return (gray + float(factor) * (rgb - gray)).clamp(0.0, 1.0)
+
+
 def lab_normalize(lab: torch.Tensor) -> torch.Tensor:
     """Map L in [0,100], a/b approximately [-128,127] to roughly [-1,1]."""
     lightness = lab[:, 0:1] / 50.0 - 1.0

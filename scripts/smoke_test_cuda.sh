@@ -28,4 +28,15 @@ common_args=(
 "$python_bin" train.py "${common_args[@]}"
 "$python_bin" train.py "${common_args[@]}" --resume auto --max-steps 4
 
-echo "CUDA SMOKE TEST PASSED: training and resume both work."
+natural_args=(
+  --config configs/smoke_div2k.yaml
+  --train-dir "$smoke_root/data/raw"
+  --val-dir "$smoke_root/data/reference"
+  --output-dir "$smoke_root/output_div2k"
+  --device cuda
+)
+
+"$python_bin" train.py "${natural_args[@]}"
+"$python_bin" train.py "${natural_args[@]}" --resume auto --max-steps 4
+
+echo "CUDA SMOKE TEST PASSED: UIEB Lab and DIV2K RGB training/resume both work."
