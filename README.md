@@ -34,9 +34,9 @@ seed、grayscale input 與模型；Cold endpoint 固定使用未修改原圖的 
 target chroma 不同。Clipping 是這輪 RGB baseline 的已知限制；之後可另做 Lab、
 HSV 或 gamut-aware color-space ablation，但不要在本輪中途改定義。
 
-## GPUTA RTX 4090：從 instance 終端機開始
+## Linux + RTX 4090 / CUDA：從終端機開始
 
-以下假設 instance 已經能執行 `nvidia-smi`。不需要下載 Stable Diffusion、SAM
+以下假設主機已安裝 NVIDIA driver，並且能執行 `nvidia-smi`。不需要下載 Stable Diffusion、SAM
 或 FlowIE 權重。
 
 ### 1. Clone
@@ -49,7 +49,7 @@ cd Cold-Diffusion---GrayScaleTest
 ### 2. 建立環境
 
 ```bash
-bash scripts/setup_gputa_4090.sh
+bash scripts/setup_cuda_4090.sh
 ```
 
 腳本會用 Conda（若存在）或 Python venv 建立 `.venv`，安裝 PyTorch 2.5.1
@@ -256,7 +256,7 @@ outputs/cold_gray_50k/
 
 ## 評估 checkpoint
 
-更新舊 instance 的評測依賴：
+更新舊環境的評測依賴：
 
 ```bash
 git pull

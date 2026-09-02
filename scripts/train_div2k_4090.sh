@@ -46,7 +46,7 @@ num_workers="${DIV2K_NUM_WORKERS:-4}"
 dry_run="${DIV2K_DRY_RUN:-0}"
 
 if [[ "$dry_run" != "1" && ! -x "$python_bin" ]]; then
-  echo "ERROR: run bash scripts/setup_gputa_4090.sh first." >&2
+  echo "ERROR: run bash scripts/setup_cuda_4090.sh first." >&2
   exit 1
 fi
 if [[ "$dry_run" != "1" && ( ! -d "$train_dir" || ! -d "$val_dir" ) ]]; then

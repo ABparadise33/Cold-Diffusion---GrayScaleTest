@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 if ! command -v nvidia-smi >/dev/null 2>&1; then
-  echo "ERROR: nvidia-smi not found. Use a Linux instance with NVIDIA driver/CUDA support." >&2
+  echo "ERROR: nvidia-smi not found. Use a Linux host with NVIDIA driver/CUDA support." >&2
   exit 1
 fi
 

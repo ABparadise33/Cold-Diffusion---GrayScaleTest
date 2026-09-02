@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 python_bin="$repo_root/.venv/bin/python"
 
 if [[ ! -x "$python_bin" ]]; then
-  echo "ERROR: run bash scripts/setup_gputa_4090.sh first." >&2
+  echo "ERROR: run bash scripts/setup_cuda_4090.sh first." >&2
   exit 1
 fi
 

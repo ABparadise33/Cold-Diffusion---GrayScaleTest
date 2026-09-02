@@ -11,7 +11,7 @@ grad_accum="${COLD_GRAD_ACCUM:-1}"
 num_workers="${COLD_NUM_WORKERS:-4}"
 
 if [[ ! -x "$python_bin" ]]; then
-  echo "ERROR: run bash scripts/setup_gputa_4090.sh first." >&2
+  echo "ERROR: run bash scripts/setup_cuda_4090.sh first." >&2
   exit 1
 fi
 if [[ ! -d "$raw_dir" || ! -d "$reference_dir" || ! -f "$split_file" ]]; then
