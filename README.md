@@ -84,26 +84,18 @@ UIEB 限學術、非商業用途。原始下載入口與使用條款請見
 
 ### 3B. 下載 DIV2K HR 並驗證
 
-只下載本實驗需要的官方 Train HR 800 張與 Validation HR 100 張：
+執行這一個指令即可：
 
 ```bash
 .venv/bin/python tools/prepare_div2k.py --delete-archives
 ```
 
-下載可續傳。ZIP 只會在成功解壓及驗證後，因 `--delete-archives` 被刪除；若要
-保留 ZIP，移除該參數。完成後：
+它會依序自動下載 Train HR 800 張與 Validation HR 100 張、解壓縮、確認全部
+900 張圖片可用，最後刪除 ZIP 節省空間。你不需要另外解壓縮。完成後：
 
 ```text
 data/DIV2K/DIV2K_train_HR/   # 0001.png ... 0800.png
 data/DIV2K/DIV2K_valid_HR/   # 0801.png ... 0900.png
-```
-
-若已手動下載並解壓，可只驗證現有資料：
-
-```bash
-.venv/bin/python tools/prepare_div2k.py \
-  --data-root /path/to/DIV2K \
-  --skip-download
 ```
 
 ### 4. 先跑 CUDA smoke test
