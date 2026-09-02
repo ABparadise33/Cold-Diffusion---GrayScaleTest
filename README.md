@@ -194,25 +194,17 @@ DIV2K_BATCH_SIZE=8 DIV2K_GRAD_ACCUM=2 \
   bash scripts/train_div2k_4090.sh all
 ```
 
-訓練後使用相同 UIEB seed-42 Test 90 評測。UIEB reference 只參與評測，不會進入
-模型 input：
+訓練後一次評測四組。它使用與 Underwater_FlowIE 相同的 UIEB seed-42 Test 90，
+保留原始圖片尺寸，並計算全部擴充指標：
 
 ```bash
-.venv/bin/python evaluate.py \
-  --checkpoint outputs/div2k_rgb_sat1_50k/checkpoints/best.pt \
-  --raw-dir data/UIEB/raw-890 \
-  --reference-dir data/UIEB/reference-890 \
-  --split-file splits/uieb_seed42.json \
-  --split test \
-  --device cuda \
-  --original-size \
-  --batch-size 1 \
-  --output-dir evaluation/div2k_rgb_sat1_uieb
+bash scripts/evaluate_div2k_uieb_4090.sh all
 ```
 
-其他倍率評測時，把 checkpoint/output 名稱改成 `div2k_rgb_sat1_25_50k`、
-`div2k_rgb_sat1_5_50k` 或 `div2k_rgb_sat2_50k`。Trajectory 會由左到右輸出
-T=20 的完整 reverse process。
+UIEB reference 只參與評測，不會進入模型 input。每組輸出 90 張 Algorithm 2、
+90 張 Direct、90 張 reference，以及完整指標 CSV。輸出資料夾分別標示為
+`1.00x`、`1.25x`、`1.50x`、`2.00x`。Trajectory 預覽會由左到右輸出 T=20
+的完整 reverse process。
 
 ## 記憶體不足時
 
