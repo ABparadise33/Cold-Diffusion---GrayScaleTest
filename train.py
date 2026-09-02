@@ -24,7 +24,13 @@ def parse_args():
     parser.add_argument("--val-dir", help="single-image validation directory for natural colorization")
     parser.add_argument("--output-dir")
     parser.add_argument("--device", default="auto")
-    parser.add_argument("--resume", nargs="?", const="auto")
+    resume_group = parser.add_mutually_exclusive_group()
+    resume_group.add_argument("--resume", nargs="?", const="auto")
+    resume_group.add_argument(
+        "--resume-if-exists",
+        action="store_true",
+        help="resume latest.pt when present; otherwise start this config from step 0",
+    )
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--grad-accum", type=int)
@@ -119,6 +125,12 @@ def main():
         if not resume_path.exists():
             raise FileNotFoundError(f"resume checkpoint not found: {resume_path}")
         trainer.load_checkpoint(resume_path)
+    elif args.resume_if_exists:
+        resume_path = Path(config["output_dir"]) / "checkpoints" / "latest.pt"
+        if resume_path.exists():
+            trainer.load_checkpoint(resume_path)
+        else:
+            print(f"no checkpoint found; starting from step 0: {resume_path}")
     trainer.train()
 
 

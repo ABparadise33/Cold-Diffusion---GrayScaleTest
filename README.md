@@ -17,18 +17,22 @@
 | Config | Training target | Output |
 |---|---|---|
 | `configs/div2k_rgb_sat1_50k.yaml` | DIV2K 原始色彩，saturation 1.0 | `outputs/div2k_rgb_sat1_50k/` |
+| `configs/div2k_rgb_sat1_25_50k.yaml` | DIV2K saturation 1.25 | `outputs/div2k_rgb_sat1_25_50k/` |
 | `configs/div2k_rgb_sat1_5_50k.yaml` | DIV2K saturation 1.5 | `outputs/div2k_rgb_sat1_5_50k/` |
+| `configs/div2k_rgb_sat2_50k.yaml` | DIV2K saturation 2.0 | `outputs/div2k_rgb_sat2_50k/` |
 
-1.5 倍不是 HSV 濾鏡，也不會改寫硬碟上的 PNG。每次載入 crop 後即時計算：
+這些倍率不是 HSV 濾鏡，也不會改寫硬碟上的 PNG。每次載入 crop 後即時計算：
 
 ```text
 g = (R + G + B) / 3
 target = clip(g + saturation_factor * (RGB - g), 0, 1)
 ```
 
-1.0 是原圖；1.5 將 RGB channels 離灰階中心的距離放大 50%。超出 sRGB
-範圍的值會 clipping。兩組使用相同原圖、crop、seed、grayscale input 與模型；
-Cold endpoint 固定使用未修改原圖的 `g`，只有 target chroma 不同。
+1.0 是原圖；1.25、1.5、2.0 分別將 RGB channels 離灰階中心的距離放大
+25%、50%、100%。超出 sRGB 範圍的值會 clipping。四組使用相同原圖、crop、
+seed、grayscale input 與模型；Cold endpoint 固定使用未修改原圖的 `g`，只有
+target chroma 不同。Clipping 是這輪 RGB baseline 的已知限制；之後可另做 Lab、
+HSV 或 gamut-aware color-space ablation，但不要在本輪中途改定義。
 
 ## GPUTA RTX 4090：從 instance 終端機開始
 
@@ -145,30 +149,56 @@ bash scripts/train_4090.sh --resume auto --max-steps 100000
 
 `latest.pt` 包含 model、EMA、optimizer、AMP scaler、step 與 RNG state。
 
-## DIV2K saturation 1.0 / 1.5 訓練
+## DIV2K saturation 1.0 / 1.25 / 1.5 / 2.0 訓練
 
 共同設定：128×128 random crop、T=20、seed 42、50k steps、每 5k validation 與
 checkpoint。4090 預設 physical/effective batch 都是 16。
 
-先跑 1.0 control，再跑 1.5；不要在同一張 GPU 同時執行兩組：
+一次依序完成四組；同一張 GPU 不會同時執行多組：
+
+```bash
+bash scripts/train_div2k_4090.sh all
+```
+
+只檢查四組執行順序與指令，不啟動訓練：
+
+```bash
+DIV2K_DRY_RUN=1 bash scripts/train_div2k_4090.sh all
+```
+
+若關閉 terminal 後仍要繼續：
+
+```bash
+nohup bash scripts/train_div2k_4090.sh all > train_div2k_all.log 2>&1 &
+tail -f train_div2k_all.log
+```
+
+如果整批被中斷，續跑已存在的 checkpoint，尚未開始的組別會自動從 step 0 開始：
+
+```bash
+bash scripts/train_div2k_4090.sh all --resume-if-exists
+```
+
+四組一起續訓／訓練到 100k：
+
+```bash
+bash scripts/train_div2k_4090.sh all --resume-if-exists --max-steps 100000
+```
+
+也可以只執行其中一組：
 
 ```bash
 bash scripts/train_div2k_4090.sh 1.0
+bash scripts/train_div2k_4090.sh 1.25
 bash scripts/train_div2k_4090.sh 1.5
-```
-
-續訓到 100k：
-
-```bash
-bash scripts/train_div2k_4090.sh 1.0 --resume auto --max-steps 100000
-bash scripts/train_div2k_4090.sh 1.5 --resume auto --max-steps 100000
+bash scripts/train_div2k_4090.sh 2.0
 ```
 
 記憶體不足時維持 effective batch 16：
 
 ```bash
 DIV2K_BATCH_SIZE=8 DIV2K_GRAD_ACCUM=2 \
-  bash scripts/train_div2k_4090.sh 1.0
+  bash scripts/train_div2k_4090.sh all
 ```
 
 訓練後使用相同 UIEB seed-42 Test 90 評測。UIEB reference 只參與評測，不會進入
@@ -187,8 +217,9 @@ DIV2K_BATCH_SIZE=8 DIV2K_GRAD_ACCUM=2 \
   --output-dir evaluation/div2k_rgb_sat1_uieb
 ```
 
-評測 1.5 時，把 checkpoint/output 名稱改成 `div2k_rgb_sat1_5_50k`。Trajectory
-會由左到右輸出 T=20 的完整 reverse process。
+其他倍率評測時，把 checkpoint/output 名稱改成 `div2k_rgb_sat1_25_50k`、
+`div2k_rgb_sat1_5_50k` 或 `div2k_rgb_sat2_50k`。Trajectory 會由左到右輸出
+T=20 的完整 reverse process。
 
 ## 記憶體不足時
 

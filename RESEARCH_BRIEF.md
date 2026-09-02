@@ -69,9 +69,11 @@ over-colorization?
 
 ### Hypothesis
 
-A DIV2K model trained with saturation factor 1.5 will recover more chroma than
-the factor-1.0 control, but it counts as an improvement only if paired UIEB
-Delta-E76/LPIPS also improve and the reverse path remains mostly monotonic.
+Increasing the training-target saturation from 1.0 through 1.25, 1.5, and 2.0
+will recover progressively more chroma on underwater inputs, but the benefit
+may stop or reverse when sRGB gamut clipping dominates. A factor counts as an
+improvement only if paired UIEB Delta-E76/LPIPS also improve and the reverse
+path remains mostly monotonic.
 
 ### Current limitation and leverage
 
@@ -82,8 +84,9 @@ anchor. This isolates the learned natural-image color prior.
 
 ### Smallest falsifiable test
 
-Train two otherwise identical 50k-step models on DIV2K train HR with 128px
-random crops, 20 Cold steps, seed 42, and saturation factors 1.0 and 1.5. The
+Train four otherwise identical 50k-step models on DIV2K train HR with 128px
+random crops, 20 Cold steps, seed 42, and saturation factors 1.0, 1.25, 1.5,
+and 2.0. The
 saturation transform expands each RGB pixel away from its channel mean:
 `clip(gray + factor * (rgb - gray), 0, 1)`. Validate on DIV2K validation HR and
 evaluate both checkpoints on the unchanged UIEB seed-42 Test 90. Both runs use
@@ -94,8 +97,14 @@ target changes.
 
 - Higher saturation alone, with worse Delta-E76/LPIPS or obvious wrong colors,
   is hallucination rather than restoration.
+- The current RGB transform clips out-of-gamut values to [0,1]. Preview images
+  show that this can affect roughly one quarter of pixels at 1.5 and nearly half
+  at 2.0 in already colorful/bright scenes. Treat clipping as a measured
+  confound, not as an incidental implementation detail.
 - Non-monotonic UIEB trajectories reject the interpretation of middle states as
   ordered restoration strength, even if the last image looks vivid.
-- Stop a run after three consecutive 5k validations without improvement. Do not
-  scale beyond DIV2K until factor 1.5 beats factor 1.0 on paired color/perceptual
-  metrics without unacceptable clipping or qualitative color errors.
+- Stop a run after three consecutive 5k validations without improvement. Select
+  the factor using paired color/perceptual metrics and qualitative color errors,
+  not saturation alone. A later ablation may move chroma scaling to Lab, HSV, or
+  another gamut-aware color space, but that change must remain separate from
+  this first RGB baseline.
