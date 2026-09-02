@@ -19,6 +19,37 @@ def index_images(folder: Path):
     return result
 
 
+def make_manifest(raw, reference, train_count, val_count, test_count, seed):
+    """Match Underwater_FlowIE's seed-42 test sampling exactly."""
+    common = sorted(set(raw) & set(reference))
+    required = train_count + val_count + test_count
+    if len(common) < required:
+        raise ValueError(f"need {required} pairs, found {len(common)}")
+    if len(common) > required:
+        print(f"warning: using {required} of {len(common)} matched pairs")
+        common = common[:required]
+
+    rng = random.Random(seed)
+    # Underwater_FlowIE/split_dataset.py selects its 90-image test set this way.
+    test_stems = rng.sample(common, test_count)
+    test_set = set(test_stems)
+    remaining = [stem for stem in common if stem not in test_set]
+    rng.shuffle(remaining)
+    train_stems = remaining[:train_count]
+    val_stems = remaining[train_count:train_count + val_count]
+
+    def records(stems):
+        return [{"raw": raw[stem], "reference": reference[stem]} for stem in stems]
+
+    return {
+        "seed": seed,
+        "split_method": "Underwater_FlowIE random.sample test set",
+        "train": records(train_stems),
+        "val": records(val_stems),
+        "test": records(test_stems),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--raw-dir", required=True)
@@ -32,24 +63,14 @@ def main():
 
     raw = index_images(Path(args.raw_dir))
     reference = index_images(Path(args.reference_dir))
-    common = sorted(set(raw) & set(reference))
-    required = args.train + args.val + args.test
-    if len(common) < required:
-        raise ValueError(f"need {required} pairs, found {len(common)}")
-    if len(common) > required:
-        print(f"warning: using {required} of {len(common)} matched pairs")
-    random.Random(args.seed).shuffle(common)
-    common = common[:required]
-
-    def records(stems):
-        return [{"raw": raw[stem], "reference": reference[stem]} for stem in stems]
-
-    manifest = {
-        "seed": args.seed,
-        "train": records(common[:args.train]),
-        "val": records(common[args.train:args.train + args.val]),
-        "test": records(common[args.train + args.val:]),
-    }
+    manifest = make_manifest(
+        raw,
+        reference,
+        args.train,
+        args.val,
+        args.test,
+        args.seed,
+    )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

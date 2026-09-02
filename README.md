@@ -71,7 +71,8 @@ ALL CHECKS PASSED
 
 此步驟沿用
 [Underwater_FlowIE](https://github.com/ABparadise33/Underwater_FlowIE)
-使用的 Hugging Face UIEB mirror，下載約 1.49 GB，並建立：
+使用完全相同的 Hugging Face repository 與 `git clone` / Git LFS 下載方式，
+下載約 1.49 GB。腳本下載後會建立與 Underwater_FlowIE 相同的 seed-42 test 90：
 
 ```text
 data/UIEB/raw-890/
