@@ -151,10 +151,11 @@ Lab-chroma factors until the fixed preview passes visual inspection.
 4. **Leverage:** Every intermediate Lab state was already represented during
    training. No loss, endpoint, time embedding, or training schedule change is
    needed to start inference from an existing intermediate state.
-5. **Smallest test:** One verified 50k DIV2K checkpoint with the original UIEB
-   recipe (paired `cold_gray`, seed 42, T=8, 128px crops, factor 1). On four fixed
-   DIV2K validation images, start at t=4,6,7 (50%,25%,12.5% remaining a/b). Default
-   inference never starts at full gray; t=8 is an explicit optional control.
+5. **Smallest test:** Use the existing verified 50k DIV2K Lab checkpoint
+   (`natural_lab_colorization`, seed 42, T=20, 128px crops, factor 1). On four
+   fixed DIV2K validation images, start at t=10,15,18 (50%,25%,10% remaining a/b).
+   Default inference never starts at full gray; t=20 is an explicit optional
+   control. A separate T=8 UIEB-recipe replication is not a prerequisite.
 6. **Failure meaning:** If even partial-color inputs become brown, endpoint
    ambiguity alone is insufficient; examine training fit and sampler behavior.
    If only full gray fails, test endpoint supervision next, without claiming
@@ -168,6 +169,7 @@ Lab-chroma factors until the fixed preview passes visual inspection.
    Include analytical chroma rescaling as a sanity control: partial Lab
    desaturation is exactly invertible before quantization when retention > 0.
 9. **Budget/stop:** Inference only on four images, no new training launched here.
-   If the required T=8 DIV2K checkpoint is absent, stop and request/prepare that
-   prerequisite explicitly; never substitute UIEB weights or the older T=20
-   DIV2K model. Preserve original output sizes and separate preview folders.
+   Do not retrain a T=8 model for this diagnostic. Preserve the existing
+   checkpoint's T=20 time labels, verify its embedded training step and Lab
+   config, and never substitute UIEB or RGB weights. Preserve original output
+   sizes and separate preview folders.

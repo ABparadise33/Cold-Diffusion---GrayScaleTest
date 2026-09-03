@@ -304,16 +304,15 @@ bash scripts/evaluate_div2k_uieb_style_4090.sh all
 ### Lab 不全灰診斷：只改推論起點，不改訓練
 
 先做這個小診斷，暫不增加飽和度、不更改 loss、不改成新的退化終點。
-它要求 **原 UIEB 核心設定的 DIV2K factor-1、T=8、50k checkpoint**：
+直接使用**已訓練好的 DIV2K Lab factor-1、T=20、50k checkpoint**，不用重訓：
 
 ```text
-outputs/div2k_uieb_style_lab_sat_1.00x_50k/checkpoints/step_050000.pt
+outputs/div2k_lab_sat1_50k/checkpoints/step_050000.pt
 ```
 
-若尚未訓練這組，需先用上一節的
-`bash scripts/train_div2k_uieb_style_4090.sh 1.0` 建立；那是前置訓練，不是本診斷
-會自動執行的工作。舊 `div2k_lab_sat1_50k` 是 T=20，不可當作相同 UIEB 設定。
-也不可拿 UIEB 權重或不確定步數的 `best.pt` 代替。
+先前把此診斷限定為 T=8 是不必要的限制，已移除。與 UIEB 對齊 T=8 的重訓是
+另一個對照實驗，不是診斷全灰瓶頸的前置條件。本次保留模型原本 T=20，
+不可將時間標號改成 T=8。仍檢查實際訓練 step=50000，不使用不確定步數的 best.pt。
 
 已具備上述 checkpoint 時，在 instance 執行：
 
@@ -327,18 +326,18 @@ crop、有效 batch、optimizer/EMA 設定與飽和度；不符合就停止，�
 實驗名稱是已存下的資料來源線索，不等同於重新驗證訓練資料內容。
 
 **Lab 路徑：** DIV2K 同一張自然圖作為原圖及 reference，令 `x0=(L,a,b)`，
-`g=(L,0,0)`。原有線性退化 `D_t=(1-t/8)x0+(t/8)g` 因此等於：
+`g=(L,0,0)`。原有線性退化 `D_t=(1-t/20)x0+(t/20)g` 因此等於：
 
 ```text
-D_t = (L, (1-t/8)a, (1-t/8)b)
-t=4：保留 50% a/b    → 4 → 3 → 2 → 1 → 0
-t=6：保留 25% a/b    → 6 → 5 → 4 → 3 → 2 → 1 → 0
-t=7：保留 12.5% a/b  → 7 → 6 → 5 → 4 → 3 → 2 → 1 → 0
+D_t = (L, (1-t/20)a, (1-t/20)b)
+t=10：保留 50% a/b  → 10 → 9 → … → 1 → 0
+t=15：保留 25% a/b  → 15 → 14 → … → 1 → 0
+t=18：保留 10% a/b  → 18 → 17 → … → 1 → 0
 ```
 
 forward 保留 L、縮小 a/b；a/b 的方向（色相）保持不變。這裡的百分比指
-Lab 色度，不是 HSV 飽和度。訓練仍使用原本到全灰的 T=8 schedule；本次只選擇
-已在 schedule 上的中途輸入。不要重新把 t=7 標成 t=8，或把半彩色輸入當成新的
+Lab 色度，不是 HSV 飽和度。模型原本使用到全灰的 T=20 schedule；本次只選擇
+已在 schedule 上的中途輸入。不要重新把 t=18 標成 t=20，或把半彩色輸入當成新的
 gray anchor。這樣不需要修改或重訓一個「新終點」模型。
 
 backward 用原時間 t 呼叫模型得到 `x0_hat=R(x_t,t)`，再套同一個 Algorithm 2：
@@ -352,7 +351,7 @@ backward 用原時間 t 呼叫模型得到 `x0_hat=R(x_t,t)`，再套同一個 A
 指標包含未修復 input 作為 baseline，避免把原本就接近 GT 的輸入誤認成模型改善。
 
 ```text
-evaluation/div2k_lab_partial_t8_step050000/
+evaluation/div2k_lab_partial_t20_step050000/
 ├── run_metadata.json        # 開始就寫入實際 checkpoint step、設定、圖片名單
 ├── metrics.json             # 全部完成後的各起點平均指標
 ├── per_image_metrics.csv    # 邊做邊存：PSNR、Delta-E76、C*、平均 a/b
@@ -364,7 +363,7 @@ evaluation/div2k_lab_partial_t8_step050000/
 │   ├── batches/
 │   └── trajectories/        # 標示原始 t 值，由左至右
 ├── retain_25pct/
-└── retain_12.5pct/
+└── retain_10pct/
 ```
 
 影像不 resize；內部使用與 DIV2K 全尺寸評測相同的 512px/64px overlap tiling。

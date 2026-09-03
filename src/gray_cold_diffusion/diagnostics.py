@@ -61,7 +61,7 @@ def check_diagnostic_checkpoint(config: dict, baseline: dict, step: int, expecte
         mismatches.append("training.effective_batch_size")
     if step != expected_step:
         mismatches.append(f"checkpoint_step={step}, expected={expected_step}")
-    if config.get("mode") != "cold_gray":
-        mismatches.append("requires paired cold_gray Lab mode")
+    if config.get("mode") not in {"cold_gray", "natural_lab_colorization"}:
+        mismatches.append("requires a Lab model (cold_gray or natural_lab_colorization)")
     if mismatches:
-        raise ValueError("checkpoint does not match the DIV2K UIEB-style control: " + "; ".join(mismatches))
+        raise ValueError("checkpoint does not match the selected DIV2K Lab control: " + "; ".join(mismatches))

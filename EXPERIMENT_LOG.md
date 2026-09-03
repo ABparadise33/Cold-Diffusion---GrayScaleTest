@@ -2,7 +2,14 @@
 
 Record real experiments here. Do not treat smoke tests as scientific evidence.
 
-## 2026-09-04 — Partial-Lab diagnostic tooling (real checkpoint run pending)
+## 2026-09-04 — Correction: use the existing T=20 checkpoint for the diagnostic
+
+- The previous T=8-only requirement mixed up a strict UIEB-recipe replication with an inexpensive endpoint-information diagnostic. It was unnecessary for the latter. No new T=8 training is required.
+- `bash scripts/diagnose_div2k_lab_4090.sh` now reads `outputs/div2k_lab_sat1_50k/checkpoints/step_050000.pt`, checks against `configs/div2k_lab_sat1_50k.yaml`, preserves T=20, and starts at t=10,15,18 (50%,25%,10% chroma retained). Output: `evaluation/div2k_lab_partial_t20_step050000/`.
+- The validator accepts both Lab modes when they match the selected configuration, while still rejecting the wrong experiment, RGB mode, saturation, diffusion schedule or training step. T=8 remains available only through an explicitly selected matching config and starts, not as a prerequisite.
+- Added T=20 oracle and full CPU CLI coverage alongside T=8 coverage; all 62 tests, Ruff, shell syntax and wrapper dry run passed. Training/model/sampler code and existing checkpoints remain unchanged. Real GPU diagnosis is pending the user's command on the instance.
+
+## 2026-09-04 — Initial partial-Lab tooling (T=8 restriction superseded above)
 
 - Question: does a DIV2K model preserve/recover correct hues when its input still contains color evidence? The UIEB-style T=8 factor-1 training configuration remains unchanged; this is an intermediate-start inference experiment, not a retrained partial-gray endpoint.
 - Deliverable: `diagnose_lab_chroma.py` and `bash scripts/diagnose_div2k_lab_4090.sh`. They require the DIV2K UIEB-style `step_050000.pt` and verify embedded experiment/config/step rather than choosing `best.pt` or substituting the older T=20 model. Checkpoint experiment names remain recorded provenance, not proof of the original training data contents.
