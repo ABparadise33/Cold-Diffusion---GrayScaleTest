@@ -2,6 +2,25 @@
 
 Record real experiments here. Do not treat smoke tests as scientific evidence.
 
+## 2026-09-04 — UIEB retrain evaluation audit (step mismatch; conclusion deferred)
+
+- Sources: `/Users/ed/Downloads/uieb_lab_retrain_test90/` and `/Users/ed/Downloads/cold_gray_original/`; inspected metrics, training summaries, rendered previews, and all exported prediction/reference PNG pairs. Local analysis code version: `64cc3b9`; the remote training code/config/environment are not included in these evaluation folders.
+- Both folders contain exactly the same 90 test image names, with identical reference pixels and matching image dimensions. CSV row/preview order is reversed. The different split-file SHA does not indicate different test membership; full train/val manifest equality has not been verified from these outputs.
+- Confound: fresh `best.pt` is step 15,000, whereas the old evaluated checkpoint is step 50,000. The fresh training summary confirms training finished at 50,000. The evaluator command previously provided selected `best.pt`, so this is not yet a matched-step regression comparison.
+- Provisional observation only: independently computed, equally image-weighted Lab chroma is 9.04 fresh vs 11.29 old (reference 20.61); mean b* is -4.24 vs -5.91, without evidence of a dataset-wide switch to the DIV2K-style warm/brown output. Original-size Delta-E76 is 20.553 vs 19.778; legacy 256-pixel PSNR-RGB is 18.247 vs 18.462. These numbers do not establish a code-regression cause.
+- Training summary: validation PSNR peaks near 14k and then plateaus; `best.pt` is selected only at 5k save intervals, explaining the 15k saved checkpoint. Do not relabel it as a 50k checkpoint.
+- Decision: no retraining or implementation change yet. Rerun inference with `UIEB_RETRAIN_CHECKPOINT=outputs/uieb_lab_retrain_50k/checkpoints/step_050000.pt UIEB_RETRAIN_EVAL_DIR=evaluation/uieb_lab_retrain_50k_test90 bash scripts/evaluate_uieb_lab_retrain_4090.sh --preview-count 90`, preserving the existing 15k evaluation. Compare images by filename, not preview index.
+
+## 2026-09-04 — Reported 50k export restores the old UIEB appearance
+
+- Source: `/Users/ed/Downloads/uieb_lab_retrain_50k_test90/`, supplied after the explicit `step_050000.pt` command above. At inspection it contains 90 predictions, direct predictions, references, comparisons, and trajectories, plus the training summary, but no evaluation `metrics.json` or metric CSV. The actual inference checkpoint step therefore still needs metadata confirmation; folder name and the 50k training summary alone are not proof.
+- Matched-image audit: 90/90 names overlap the old evaluation, every reference pixel is identical, and every prediction/reference geometry matches. New `batch_087.png` corresponds to old `batch_002.png` (449_img_), rather than matching by preview index.
+- Independently recomputed on original-size 8-bit PNGs, equally weighting images: old/new RGB PSNR = 18.3803/18.5238 dB; Delta-E76 = 19.7725/19.6060; mean Lab chroma = 11.2933/10.7551 (GT = 20.6113); mean a* = -5.1309/-4.9986 and b* = -5.9141/-5.6555. Do not mix these original-size PNG scores with the legacy 256px RGB metrics or unquantized tensor metrics.
+- Paired bootstrap (5,000 resamples, seed 42) of new-minus-old: PSNR +0.1435 dB, 95% interval [0.0493, 0.2423]; Delta-E76 -0.1666, interval [-0.3541, 0.0326]; chroma -0.5381, interval [-0.7494, -0.3451]. These intervals describe sampling variation across these images, not training-seed uncertainty or proof of equivalence.
+- Visual checks included the original diver and statue previews, the largest old/new image difference (226_img_), and the diver's trajectory. The new export is cool/desaturated, not globally brown; the diver gradually returns to blue along its trajectory. This weakens the shared-output-sepia-regression hypothesis, but does not establish that every implementation detail is unchanged or explain DIV2K failure.
+- Decision: retain the UIEB appearance control; defer a formal matched-50k result until the inference metadata is supplied. Do not scale saturation or train longer merely from this result. Next investigate DIV2K factor-1 color learning with the same paired Lab path.
+- User-requested organization: future `evaluate.py` comparisons go into `batches/`, trajectories into `trajectories/`; old downloads are untouched. Only save paths and documentation change, with CPU CLI tests covering Lab, RGB, and one-shot paths and original geometry.
+
 | Date | Question | Code/config | Data | Command | Result | Decision |
 |---|---|---|---|---|---|---|
 | 2026-08-24 | Does the implementation satisfy endpoint, sampler, and resume invariants? | Initial 50k implementation | Synthetic tensors and 8 synthetic paired images | `pytest -q`; smoke train 2 steps; `--resume auto --max-steps 4`; `evaluate.py` | 4/4 tests passed; CLI resumed from step 2 and completed step 4; evaluation artifacts written | Implementation is ready for a 50-pair overfit test; these results are not scientific evidence. |

@@ -224,7 +224,7 @@ def main():
                 stages.append(("reference", reference))
                 save_stage_strip(
                     stages,
-                    output / f"batch_{preview_saved:03d}.png",
+                    output / "batches" / f"batch_{preview_saved:03d}.png",
                     image_index=image_index,
                     display_scale=preview_scale,
                     max_side=args.preview_max_side,
@@ -232,7 +232,7 @@ def main():
                 if mode in iterative_modes:
                     save_trajectory_grid(
                         trajectory,
-                        output / f"trajectory_{preview_saved:03d}.png",
+                        output / "trajectories" / f"trajectory_{preview_saved:03d}.png",
                         image_index=image_index,
                         display_scale=preview_scale,
                         color_space=trajectory_color_space,

@@ -411,10 +411,17 @@ evaluation/cold_gray_50k_original/
 ├── extended_metrics.csv     # Algorithm 2 的 90 張逐張結果
 ├── direct_predictions/      # Direct 輸出
 ├── predictions/             # Algorithm 2 輸出
-├── references/           # 與輸出對齊的 90 張 GT
-├── batch_000.png          # raw → gray → Direct → Algorithm 2 → reference
-└── trajectory_000.png     # reverse 0/8 → 8/8，由左至右
+├── references/             # 與輸出對齊的 90 張 GT
+├── batches/                # raw → gray → Direct → Algorithm 2 → reference
+│   ├── batch_000.png
+│   └── ...
+└── trajectories/           # reverse 0/8 → 8/8，由左至右
+    ├── trajectory_000.png
+    └── ...
 ```
+
+比較圖與 trajectory 分別放在子資料夾，指標及訓練曲線留在實驗目錄頂層。
+此調整只影響輸出位置，不改動推論、圖片尺寸或既有檔案；不會自動搬移舊結果。
 
 Direct 與 Algorithm 2 使用同一個 Cold checkpoint，不需要重新訓練：
 
