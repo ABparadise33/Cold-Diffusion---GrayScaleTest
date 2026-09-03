@@ -128,3 +128,13 @@ overlap-feathered evaluator preserves output geometry while fitting the 4090.
 If the brown bias is already systematic on these in-domain images, reject the
 domain-shift explanation and inspect the target/state conversion, objective,
 and checkpoint before any additional training.
+
+### Implementation-regression gate
+
+Before another DIV2K run, retrain the original UIEB Lab configuration from
+step zero under a new output name. Save one fixed validation example every
+1,000 steps. If the fresh UIEB run develops the new brown bias, treat that as a
+shared implementation regression and stop. If it recovers the earlier cool,
+low-chroma behavior, run DIV2K through the same paired loader, Lab state,
+T=8, architecture, and optimizer. Test factor 1 first; do not start the higher
+Lab-chroma factors until the fixed preview passes visual inspection.

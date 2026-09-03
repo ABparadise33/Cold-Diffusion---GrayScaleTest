@@ -158,6 +158,17 @@ class Trainer:
                     "resume saturation mismatch: "
                     f"{saved_factor:g} != {current_factor:g}"
                 )
+        saved_reference_factor = float(
+            saved_config.get("data", {}).get("reference_saturation_factor", 1.0)
+        )
+        current_reference_factor = float(
+            self.config.get("data", {}).get("reference_saturation_factor", 1.0)
+        )
+        if saved_reference_factor != current_reference_factor:
+            raise ValueError(
+                "resume reference saturation mismatch: "
+                f"{saved_reference_factor:g} != {current_reference_factor:g}"
+            )
         self.model.load_state_dict(checkpoint["model"])
         self.ema.load_state_dict(checkpoint["ema"])
         self.optimizer.load_state_dict(checkpoint["optimizer"])
@@ -184,6 +195,9 @@ class Trainer:
         totals = {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0, "monotonic": 0.0}
         count = 0
         sample = None
+        preview_name = str(
+            self.config.get("data", {}).get("validation_preview_name", "")
+        )
         max_batches = int(self.config["training"].get("max_val_batches", 20))
         for batch_index, batch in enumerate(self.val_loader):
             if batch_index >= max_batches:
@@ -204,16 +218,22 @@ class Trainer:
                 trajectory_lab, reference_lab
             ).sum().item()
             count += batch_size
-            if sample is None:
+            batch_names = [str(name) for name in batch["name"]]
+            should_capture = sample is None and (
+                not preview_name or preview_name in batch_names
+            )
+            if should_capture:
+                image_index = batch_names.index(preview_name) if preview_name else 0
+                sample_slice = slice(image_index, image_index + 1)
                 full_t = torch.full((batch_size,), self.bridge.steps, device=self.device, dtype=torch.long)
                 direct_state = self.ema(anchor, full_t).clamp(-1, 1)
                 sample = (
-                    raw_rgb,
-                    self._state_to_rgb(anchor),
-                    self._state_to_rgb(direct_state),
-                    pred_rgb,
-                    reference_rgb,
-                    trajectory,
+                    raw_rgb[sample_slice],
+                    self._state_to_rgb(anchor)[sample_slice],
+                    self._state_to_rgb(direct_state)[sample_slice],
+                    pred_rgb[sample_slice],
+                    reference_rgb[sample_slice],
+                    [state[sample_slice] for state in trajectory],
                 )
         if count == 0:
             raise RuntimeError("validation loader produced no samples")

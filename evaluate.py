@@ -260,6 +260,10 @@ def main():
         metrics["evaluation"]["training_saturation_factor"] = float(
             config.get("data", {}).get("saturation_factor", 1.0)
         )
+    if "reference_saturation_factor" in config.get("data", {}):
+        metrics["evaluation"]["training_reference_lab_saturation_factor"] = float(
+            config["data"]["reference_saturation_factor"]
+        )
 
     if args.extended_metrics:
         del inference_model, model, bridge

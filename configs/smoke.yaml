@@ -6,6 +6,7 @@ output_dir: outputs/smoke
 data:
   image_size: 32
   num_workers: 0
+  validation_preview_name: "sample_04"
 
 model:
   base_channels: 8

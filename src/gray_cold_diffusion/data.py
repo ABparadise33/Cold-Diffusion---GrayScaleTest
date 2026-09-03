@@ -9,7 +9,7 @@ from PIL import Image
 import torch
 from torch.utils.data import Dataset
 
-from .color import adjust_saturation_from_channel_mean
+from .color import adjust_saturation_from_channel_mean, adjust_saturation_lab_chroma
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
@@ -29,11 +29,15 @@ class PairedImageDataset(Dataset):
         split: str,
         image_size: int | None = 128,
         augment: bool = False,
+        reference_saturation_factor: float = 1.0,
     ):
         self.raw_dir = Path(raw_dir)
         self.reference_dir = Path(reference_dir)
         self.image_size = None if image_size is None else int(image_size)
         self.augment = augment
+        self.reference_saturation_factor = float(reference_saturation_factor)
+        if self.reference_saturation_factor < 0:
+            raise ValueError("reference_saturation_factor must be >= 0")
         if self.image_size is None and self.augment:
             raise ValueError("original-size loading does not support random crop augmentation")
         with Path(split_file).open("r", encoding="utf-8") as handle:
@@ -75,9 +79,13 @@ class PairedImageDataset(Dataset):
             raise ValueError(f"unaligned pair: {raw_path.name} {raw.size} vs {reference_path.name} {reference.size}")
         raw, reference = self._resize_if_needed(raw, reference)
         if self.image_size is None:
+            raw_tensor = _to_tensor(raw)
+            reference_tensor = adjust_saturation_lab_chroma(
+                _to_tensor(reference).unsqueeze(0), self.reference_saturation_factor
+            ).squeeze(0)
             return {
-                "raw": _to_tensor(raw),
-                "reference": _to_tensor(reference),
+                "raw": raw_tensor,
+                "reference": reference_tensor,
                 "name": raw_path.stem,
             }
         width, height = raw.size
@@ -92,9 +100,14 @@ class PairedImageDataset(Dataset):
         if self.augment and random.random() < 0.5:
             raw = raw.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
             reference = reference.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        raw_tensor = _to_tensor(raw)
+        reference_tensor = _to_tensor(reference)
+        reference_tensor = adjust_saturation_lab_chroma(
+            reference_tensor.unsqueeze(0), self.reference_saturation_factor
+        ).squeeze(0)
         return {
-            "raw": _to_tensor(raw),
-            "reference": _to_tensor(reference),
+            "raw": raw_tensor,
+            "reference": reference_tensor,
             "name": raw_path.stem,
         }
 

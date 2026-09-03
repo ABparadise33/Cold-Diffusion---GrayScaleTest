@@ -119,6 +119,17 @@ def normalized_lab_to_rgb(lab: torch.Tensor) -> torch.Tensor:
     return lab_to_rgb(lab_denormalize(lab))
 
 
+def adjust_saturation_lab_chroma(rgb: torch.Tensor, factor: float) -> torch.Tensor:
+    """Scale CIE Lab a/b while preserving L and hue before gamut clipping."""
+    if factor < 0:
+        raise ValueError("saturation factor must be >= 0")
+    if factor == 1.0:
+        return rgb
+    lab = rgb_to_lab(rgb)
+    scaled = torch.cat((lab[:, 0:1], lab[:, 1:3] * float(factor)), dim=1)
+    return lab_to_rgb(scaled)
+
+
 def gray_anchor(raw_lab: torch.Tensor) -> torch.Tensor:
     """Keep raw luminance and remove all Lab chroma."""
     return torch.cat((raw_lab[:, 0:1], torch.zeros_like(raw_lab[:, 1:3])), dim=1)

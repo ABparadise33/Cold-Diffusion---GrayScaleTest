@@ -240,6 +240,67 @@ bash scripts/evaluate_div2k_lab_uieb_4090.sh
 訓練輸出為 `outputs/div2k_lab_sat1_50k/`，評測輸出為
 `evaluation/div2k_lab_sat_1.00x_uieb/`，不會覆蓋先前 RGB 實驗。
 
+## 從零驗證目前 UIEB Lab 實作
+
+這個 run 不讀取舊 checkpoint，輸出位置也與舊實驗分開：
+
+```bash
+bash scripts/train_uieb_lab_retrain_4090.sh
+```
+
+每 1,000 steps 固定輸出同一張 validation 圖：
+
+```text
+outputs/uieb_lab_retrain_50k/samples/step_001000.png
+outputs/uieb_lab_retrain_50k/samples/step_002000.png
+...
+```
+
+同時保留對應 trajectory。若中斷後要續訓，必須明確指定：
+
+```bash
+bash scripts/train_uieb_lab_retrain_4090.sh --resume auto
+```
+
+完成後評測相同 seed-42 Test90：
+
+```bash
+bash scripts/evaluate_uieb_lab_retrain_4090.sh
+```
+
+先確認它能恢復原本 UIEB 的偏淡／冷色結果；若新 UIEB 也變成褐色，停止
+DIV2K，先查共用實作。
+
+## UIEB-style Lab 設定重新訓練 DIV2K
+
+UIEB regression 通過後，先只跑 factor 1：
+
+```bash
+bash scripts/train_div2k_uieb_style_4090.sh 1.0
+```
+
+這組改用與 UIEB 相同的 `cold_gray`、CIE Lab、T=8、128 crop、seed 42。
+DIV2K 沒有退化／GT 成對資料，因此同一張原圖同時作為 raw 與 reference。
+固定使用彩色內容明確的 `0803.png`，每 1,000 steps 寫入：
+
+```text
+outputs/div2k_uieb_style_lab_sat_1.00x_50k/samples/step_001000.png
+```
+
+只有 factor 1 的 validation 圖正常後，才執行其餘 Lab chroma target：
+
+```bash
+bash scripts/train_div2k_uieb_style_4090.sh 1.25
+bash scripts/train_div2k_uieb_style_4090.sh 1.5
+bash scripts/train_div2k_uieb_style_4090.sh 2.0
+```
+
+一次評測四組原始尺寸 DIV2K Val100：
+
+```bash
+bash scripts/evaluate_div2k_uieb_style_4090.sh all
+```
+
 ### 先確認模型在 DIV2K 本身是否已經偏褐色
 
 以官方 validation `0801.png`–`0900.png` 全部 100 張作為 input 與 reference，

@@ -74,3 +74,47 @@ def test_natural_dataset_generates_saturation_target_without_modifying_source(tm
     assert stronger_chroma > original_chroma
     with Image.open(image_dir / "sample.png") as source:
         assert np.asarray(source)[0, 0].tolist() == [90, 120, 150]
+
+
+def test_paired_lab_saturation_changes_only_reference(tmp_path):
+    raw_dir, reference_dir, split_file = _write_pair(
+        tmp_path, "wide.png", (40, 40)
+    )
+    raw_array = np.full((40, 40, 3), [20, 80, 140], dtype=np.uint8)
+    reference_array = np.full((40, 40, 3), [80, 130, 180], dtype=np.uint8)
+    Image.fromarray(raw_array).save(raw_dir / "wide.png")
+    Image.fromarray(reference_array).save(reference_dir / "wide.png")
+    baseline = PairedImageDataset(
+        raw_dir,
+        reference_dir,
+        split_file,
+        "test",
+        image_size=32,
+        augment=False,
+        reference_saturation_factor=1.0,
+    )[0]
+    stronger = PairedImageDataset(
+        raw_dir,
+        reference_dir,
+        split_file,
+        "test",
+        image_size=32,
+        augment=False,
+        reference_saturation_factor=1.5,
+    )[0]
+
+    assert torch.equal(stronger["raw"], baseline["raw"])
+    assert torch.equal(
+        baseline["reference"],
+        torch.from_numpy(reference_array[:32, :32].copy()).permute(2, 0, 1).float()
+        / 255.0,
+    )
+    baseline_chroma = (
+        baseline["reference"].max(0).values
+        - baseline["reference"].min(0).values
+    ).mean()
+    stronger_chroma = (
+        stronger["reference"].max(0).values
+        - stronger["reference"].min(0).values
+    ).mean()
+    assert stronger_chroma > baseline_chroma

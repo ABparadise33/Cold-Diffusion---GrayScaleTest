@@ -93,11 +93,30 @@ def main():
             raise SystemExit(
                 "ERROR: paired modes require --raw-dir, --reference-dir, and --split-file"
             )
+        reference_saturation_factor = float(
+            config["data"].get("reference_saturation_factor", 1.0)
+        )
         train_dataset = PairedImageDataset(
-            args.raw_dir, args.reference_dir, args.split_file, "train", image_size, augment=True
+            args.raw_dir,
+            args.reference_dir,
+            args.split_file,
+            "train",
+            image_size,
+            augment=True,
+            reference_saturation_factor=reference_saturation_factor,
         )
         val_dataset = PairedImageDataset(
-            args.raw_dir, args.reference_dir, args.split_file, "val", image_size, augment=False
+            args.raw_dir,
+            args.reference_dir,
+            args.split_file,
+            "val",
+            image_size,
+            augment=False,
+            reference_saturation_factor=reference_saturation_factor,
+        )
+        print(
+            f"paired_data train={len(train_dataset)} val={len(val_dataset)} "
+            f"reference_lab_saturation={reference_saturation_factor:g}x"
         )
     generator = torch.Generator().manual_seed(int(config["seed"]))
     loader_args = dict(
