@@ -121,3 +121,10 @@ the same DIV2K validation images and UIEB Test 90. If Lab is also brown on
 UIEB while remaining credible on DIV2K, the natural-to-underwater domain shift
 or grayscale information bottleneck—not RGB saturation scaling—is the likely
 failure mechanism.
+
+The decisive in-domain check uses all 100 original-resolution DIV2K validation
+images rather than the trainer's single fixed 128px center crop. A tiled,
+overlap-feathered evaluator preserves output geometry while fitting the 4090.
+If the brown bias is already systematic on these in-domain images, reject the
+domain-shift explanation and inspect the target/state conversion, objective,
+and checkpoint before any additional training.

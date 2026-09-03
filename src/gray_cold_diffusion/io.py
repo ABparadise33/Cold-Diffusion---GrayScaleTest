@@ -65,15 +65,28 @@ def save_stage_strip(
     path: Path,
     image_index: int = 0,
     display_scale: int = 1,
+    max_side: int | None = None,
 ):
-    """Save one sample's stages from left to right without reducing resolution."""
+    """Save one sample's stages from left to right.
+
+    ``max_side`` only changes this comparison preview. Individually exported
+    predictions and references keep their original dimensions.
+    """
     if display_scale < 1:
         raise ValueError("display_scale must be >= 1")
+    if max_side is not None and max_side < 1:
+        raise ValueError("max_side must be >= 1")
     path.parent.mkdir(parents=True, exist_ok=True)
     tiles = []
     for label, images in stages:
         image = images[image_index] if images.ndim == 4 else images
         tile = _tensor_to_pil(image)
+        if max_side is not None and max(tile.size) > max_side:
+            scale = max_side / max(tile.size)
+            tile = tile.resize(
+                (max(1, round(tile.width * scale)), max(1, round(tile.height * scale))),
+                Image.Resampling.LANCZOS,
+            )
         if display_scale > 1:
             tile = tile.resize(
                 (tile.width * display_scale, tile.height * display_scale),
@@ -123,6 +136,7 @@ def save_trajectory_grid(
     image_index: int = 0,
     display_scale: int = 1,
     color_space: str = "lab",
+    max_side: int | None = None,
 ):
     if color_space not in {"lab", "rgb"}:
         raise ValueError(f"unsupported trajectory color space: {color_space}")
@@ -130,7 +144,13 @@ def save_trajectory_grid(
     stages = []
     for index, state in enumerate(trajectory):
         stages.append((f"reverse {index}/{len(trajectory)-1}", to_rgb(state)))
-    save_stage_strip(stages, path, image_index=image_index, display_scale=display_scale)
+    save_stage_strip(
+        stages,
+        path,
+        image_index=image_index,
+        display_scale=display_scale,
+        max_side=max_side,
+    )
 
 
 def atomic_torch_save(payload: dict, path: Path):

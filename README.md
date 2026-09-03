@@ -240,6 +240,36 @@ bash scripts/evaluate_div2k_lab_uieb_4090.sh
 訓練輸出為 `outputs/div2k_lab_sat1_50k/`，評測輸出為
 `evaluation/div2k_lab_sat_1.00x_uieb/`，不會覆蓋先前 RGB 實驗。
 
+### 先確認模型在 DIV2K 本身是否已經偏褐色
+
+以官方 validation `0801.png`–`0900.png` 全部 100 張作為 input 與 reference，
+一次輸出 Lab 與 RGB factor-1 的結果：
+
+```bash
+bash scripts/evaluate_div2k_validation_4090.sh both
+```
+
+只跑新的 Lab 模型：
+
+```bash
+bash scripts/evaluate_div2k_validation_4090.sh lab
+```
+
+每張 `predictions/*.png`（Algorithm 2）、`direct_predictions/*.png`（Direct）與
+`references/*.png` 都保留 DIV2K 原始尺寸與長寬比。推論內部預設使用
+512px、overlap 64px 的重疊 tiles，避免整張 HR 圖直接進入 4090 而 OOM；
+只有六張橫向比較圖與 trajectory 預覽會縮到最長邊 512px。
+
+若 DIV2K prediction 本身就普遍偏褐色，問題已存在於訓練／模型，不是 UIEB
+domain shift。若 DIV2K 顏色正常、只有 UIEB 偏褐色，才支持 domain shift 解釋。
+
+輸出：
+
+```text
+evaluation/div2k_lab_sat_1.00x_div2k_val/
+evaluation/div2k_rgb_sat_1.00x_div2k_val/
+```
+
 ## 記憶體不足時
 
 維持 effective batch 16：

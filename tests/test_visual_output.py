@@ -35,3 +35,16 @@ def test_stage_and_trajectory_strips_are_horizontal(tmp_path: Path):
     )
     with Image.open(rgb_trajectory_path) as trajectory:
         assert trajectory.width == 5 * 16 * 2
+
+
+def test_preview_max_side_preserves_aspect_ratio(tmp_path: Path):
+    images = torch.rand(1, 3, 60, 120)
+    path = tmp_path / "comparison_small.png"
+    save_stage_strip(
+        [("raw", images), ("prediction", images)],
+        path,
+        max_side=30,
+    )
+    with Image.open(path) as comparison:
+        assert comparison.width == 60
+        assert comparison.height == 15 + 28

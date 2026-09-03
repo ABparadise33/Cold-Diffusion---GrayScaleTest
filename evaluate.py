@@ -28,6 +28,7 @@ from gray_cold_diffusion.io import save_stage_strip, save_tensor_image, save_tra
 from gray_cold_diffusion.metrics import delta_e76, psnr, ssim, trajectory_monotonic_fraction
 from gray_cold_diffusion.model import RestorationUNet
 from gray_cold_diffusion.report import save_training_report
+from gray_cold_diffusion.tiling import TiledModel
 
 
 def main():
@@ -49,6 +50,17 @@ def main():
     )
     parser.add_argument("--preview-count", type=int, default=3)
     parser.add_argument("--preview-scale", type=int, help="display-only upscaling; automatic if omitted")
+    parser.add_argument(
+        "--preview-max-side",
+        type=int,
+        help="display-only maximum side for comparison and trajectory tiles",
+    )
+    parser.add_argument(
+        "--tile-size",
+        type=int,
+        help="overlapping inference tile size; recommended for full-resolution DIV2K",
+    )
+    parser.add_argument("--tile-overlap", type=int, default=64)
     parser.add_argument("--training-metrics", help="metrics.csv; auto-detected from checkpoint if omitted")
     parser.add_argument("--extended-metrics", action="store_true", help="run the 14 FlowIE metrics")
     parser.add_argument(
@@ -74,6 +86,18 @@ def main():
     bridge = GrayBridge(steps).to(device)
     if args.original_size and args.batch_size != 1:
         parser.error("--original-size requires --batch-size 1 because UIEB image sizes vary")
+    if args.tile_size is not None:
+        if args.batch_size != 1:
+            parser.error("--tile-size requires --batch-size 1")
+        if args.tile_size < 1:
+            parser.error("--tile-size must be >= 1")
+        if args.tile_overlap < 0 or args.tile_overlap >= args.tile_size:
+            parser.error("--tile-overlap must satisfy 0 <= overlap < tile-size")
+    inference_model = (
+        TiledModel(model, args.tile_size, args.tile_overlap)
+        if args.tile_size is not None
+        else model
+    )
     image_size = None if args.original_size else (args.image_size or int(config["data"]["image_size"]))
     dataset = PairedImageDataset(
         args.raw_dir, args.reference_dir, args.split_file, args.split,
@@ -133,16 +157,16 @@ def main():
                 trajectory_color_space = "lab"
             t = torch.full((raw.shape[0],), steps, device=device, dtype=torch.long)
             if mode in iterative_modes:
-                direct_state = model(anchor, t).clamp(-1, 1)
+                direct_state = inference_model(anchor, t).clamp(-1, 1)
                 direct = state_to_rgb(direct_state)
                 pred_state, trajectory = bridge.sample(
-                    model, anchor, return_trajectory=True
+                    inference_model, anchor, return_trajectory=True
                 )
             else:
                 direct_state = None
                 direct = None
                 state = anchor if mode == "gray_oneshot" else raw_state
-                pred_state = model(state, t).clamp(-1, 1)
+                pred_state = inference_model(state, t).clamp(-1, 1)
                 trajectory = [state, pred_state]
             pred = state_to_rgb(pred_state)
             pred_lab = rgb_to_normalized_lab(pred)
@@ -203,6 +227,7 @@ def main():
                     output / f"batch_{preview_saved:03d}.png",
                     image_index=image_index,
                     display_scale=preview_scale,
+                    max_side=args.preview_max_side,
                 )
                 if mode in iterative_modes:
                     save_trajectory_grid(
@@ -211,8 +236,10 @@ def main():
                         image_index=image_index,
                         display_scale=preview_scale,
                         color_space=trajectory_color_space,
+                        max_side=args.preview_max_side,
                     )
                 preview_saved += 1
+            print(f"inference {count}/{len(dataset)}")
     metrics = {key: value / count for key, value in totals.items()}
     if direct_totals is not None:
         metrics["direct"] = {key: value / count for key, value in direct_totals.items()}
@@ -224,6 +251,8 @@ def main():
         "num_images": count,
         "image_size": image_size,
         "spatial_mode": "original_size" if image_size is None else "square_crop",
+        "tile_size": args.tile_size,
+        "tile_overlap": args.tile_overlap if args.tile_size is not None else None,
         "split_file": str(split_path.resolve()),
         "split_sha256": hashlib.sha256(split_path.read_bytes()).hexdigest(),
     }
@@ -233,7 +262,7 @@ def main():
         )
 
     if args.extended_metrics:
-        del model, bridge
+        del inference_model, model, bridge
         if device.type == "cuda":
             torch.cuda.empty_cache()
         pyiqa_metrics = create_pyiqa_metrics(device)
