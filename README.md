@@ -301,7 +301,87 @@ bash scripts/train_div2k_uieb_style_4090.sh 2.0
 bash scripts/evaluate_div2k_uieb_style_4090.sh all
 ```
 
-### 先確認模型在 DIV2K 本身是否已經偏褐色
+### Lab 不全灰診斷：只改推論起點，不改訓練
+
+先做這個小診斷，暫不增加飽和度、不更改 loss、不改成新的退化終點。
+它要求 **原 UIEB 核心設定的 DIV2K factor-1、T=8、50k checkpoint**：
+
+```text
+outputs/div2k_uieb_style_lab_sat_1.00x_50k/checkpoints/step_050000.pt
+```
+
+若尚未訓練這組，需先用上一節的
+`bash scripts/train_div2k_uieb_style_4090.sh 1.0` 建立；那是前置訓練，不是本診斷
+會自動執行的工作。舊 `div2k_lab_sat1_50k` 是 T=20，不可當作相同 UIEB 設定。
+也不可拿 UIEB 權重或不確定步數的 `best.pt` 代替。
+
+已具備上述 checkpoint 時，在 instance 執行：
+
+```bash
+git pull
+bash scripts/diagnose_div2k_lab_4090.sh
+```
+
+程式會檢查 checkpoint 內記錄的 step、實驗名稱、mode、T、模型設定、seed、
+crop、有效 batch、optimizer/EMA 設定與飽和度；不符合就停止，不會偷偷換模型。
+實驗名稱是已存下的資料來源線索，不等同於重新驗證訓練資料內容。
+
+**Lab 路徑：** DIV2K 同一張自然圖作為原圖及 reference，令 `x0=(L,a,b)`，
+`g=(L,0,0)`。原有線性退化 `D_t=(1-t/8)x0+(t/8)g` 因此等於：
+
+```text
+D_t = (L, (1-t/8)a, (1-t/8)b)
+t=4：保留 50% a/b    → 4 → 3 → 2 → 1 → 0
+t=6：保留 25% a/b    → 6 → 5 → 4 → 3 → 2 → 1 → 0
+t=7：保留 12.5% a/b  → 7 → 6 → 5 → 4 → 3 → 2 → 1 → 0
+```
+
+forward 保留 L、縮小 a/b；a/b 的方向（色相）保持不變。這裡的百分比指
+Lab 色度，不是 HSV 飽和度。訓練仍使用原本到全灰的 T=8 schedule；本次只選擇
+已在 schedule 上的中途輸入。不要重新把 t=7 標成 t=8，或把半彩色輸入當成新的
+gray anchor。這樣不需要修改或重訓一個「新終點」模型。
+
+backward 用原時間 t 呼叫模型得到 `x0_hat=R(x_t,t)`，再套同一個 Algorithm 2：
+`x_(t-1)=x_t-D_t(x0_hat,g)+D_(t-1)(x0_hat,g)`。它不是直接把輸入彩度乘大。
+影像的模型輸出仍可能改變 L；只保證人工 forward 的 L 不變。
+
+預設 seed42 抽固定 4 張 DIV2K validation，三種保留量共 12 組；不包含全灰。
+每組輸出原尺寸 input、Direct、Algorithm 2、解析反轉對照、reference 與軌跡。
+解析反轉在保留量 > 0 時可用 a/b 除以保留比例還原，僅作計算與模型能力的對照。
+**部分去色仍含 GT 的色彩資訊，不能拿這個好分數宣稱解決全灰上色或水下修復。**
+指標包含未修復 input 作為 baseline，避免把原本就接近 GT 的輸入誤認成模型改善。
+
+```text
+evaluation/div2k_lab_partial_t8_step050000/
+├── run_metadata.json        # 開始就寫入實際 checkpoint step、設定、圖片名單
+├── metrics.json             # 全部完成後的各起點平均指標
+├── per_image_metrics.csv    # 邊做邊存：PSNR、Delta-E76、C*、平均 a/b
+├── references/
+├── retain_50pct/
+│   ├── inputs/
+│   ├── direct_predictions/
+│   ├── predictions/
+│   ├── batches/
+│   └── trajectories/        # 標示原始 t 值，由左至右
+├── retain_25pct/
+└── retain_12.5pct/
+```
+
+影像不 resize；內部使用與 DIV2K 全尺寸評測相同的 512px/64px overlap tiling。
+比較圖也預設保留原尺寸。程式不會覆蓋既有非空輸出目錄；重跑請另給 `--output-dir`。
+這是快速診斷，不載入或下載 pyiqa 權重。
+
+可選的同 checkpoint 全灰對照（只在明確要比較全灰時加入）：
+
+```bash
+bash scripts/diagnose_div2k_lab_4090.sh --include-gray-control \
+  --output-dir evaluation/div2k_lab_partial_with_gray_control
+```
+
+若有色彩提示仍被推成褐色，就不能只怪全灰資訊不足；若只在全灰失敗，下一步才
+分開測試增加全灰訓練比例。單次實驗不保證已找出唯一原因。
+
+### 舊 T=20 Lab/RGB 模型的 DIV2K 全灰評測
 
 以官方 validation `0801.png`–`0900.png` 全部 100 張作為 input 與 reference，
 一次輸出 Lab 與 RGB factor-1 的結果：

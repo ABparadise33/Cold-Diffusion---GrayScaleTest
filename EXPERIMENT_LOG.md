@@ -2,6 +2,15 @@
 
 Record real experiments here. Do not treat smoke tests as scientific evidence.
 
+## 2026-09-04 — Partial-Lab diagnostic tooling (real checkpoint run pending)
+
+- Question: does a DIV2K model preserve/recover correct hues when its input still contains color evidence? The UIEB-style T=8 factor-1 training configuration remains unchanged; this is an intermediate-start inference experiment, not a retrained partial-gray endpoint.
+- Deliverable: `diagnose_lab_chroma.py` and `bash scripts/diagnose_div2k_lab_4090.sh`. They require the DIV2K UIEB-style `step_050000.pt` and verify embedded experiment/config/step rather than choosing `best.pt` or substituting the older T=20 model. Checkpoint experiment names remain recorded provenance, not proof of the original training data contents.
+- Conditions: fixed seed42 subset of four DIV2K validation images; start t=4,6,7 on the unchanged T=8 Lab path (50%,25%,12.5% a/b retained), saturation factor 1.0. Original geometry and 512/64 tiled inference are constant. Default excludes full gray; an explicit optional flag adds t=8 as a separate control.
+- Controls/artifacts: input baseline, Direct, Algorithm 2, analytic inversion, target, actual-t trajectories; per-image PSNR/Delta-E76/chroma/mean-a/b CSV flushed after each image-condition; metadata written at startup. Comparisons and trajectories have separate subfolders. Analytical inversion demonstrates that partial desaturation still contains the answer and is not an underwater/grayscale restoration benchmark.
+- Verification: CPU synthetic CLI/oracle tests and the full suite; 56 tests passed, Ruff passed, shell syntax passed. Oracle tests cover original time labels and verify that the new diagnostic entry at t=8 is bit-identical to the existing Algorithm 2. The existing training, bridge, model, and regular evaluation code are not modified.
+- Status/decision: no real inference or GPU training has run locally. The required T=8 DIV2K checkpoint's existence on the instance is unconfirmed. If absent, the prerequisite control must be trained explicitly before this strict experiment; do not describe a T=20 run as having identical UIEB settings.
+
 ## 2026-09-04 — UIEB retrain evaluation audit (step mismatch; conclusion deferred)
 
 - Sources: `/Users/ed/Downloads/uieb_lab_retrain_test90/` and `/Users/ed/Downloads/cold_gray_original/`; inspected metrics, training summaries, rendered previews, and all exported prediction/reference PNG pairs. Local analysis code version: `64cc3b9`; the remote training code/config/environment are not included in these evaluation folders.

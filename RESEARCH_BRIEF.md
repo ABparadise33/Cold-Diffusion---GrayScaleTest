@@ -138,3 +138,36 @@ shared implementation regression and stop. If it recovers the earlier cool,
 low-chroma behavior, run DIV2K through the same paired loader, Lab state,
 T=8, architecture, and optimizer. Test factor 1 first; do not start the higher
 Lab-chroma factors until the fixed preview passes visual inspection.
+
+## Partial-chroma endpoint diagnostic (2026-09-04)
+
+1. **Question/motivation:** Is DIV2K's brown output specifically a failure to
+   infer colors from a completely gray input? This distinguishes loss of color
+   evidence from a general Lab conversion or sampler failure.
+2. **Hypothesis:** The same model restores substantially better hue/color from
+   a partially desaturated input than from full gray.
+3. **Limitation:** The existing all-gray test confounds recoloring ambiguous
+   content with ordinary recovery of attenuated but still-observed chroma.
+4. **Leverage:** Every intermediate Lab state was already represented during
+   training. No loss, endpoint, time embedding, or training schedule change is
+   needed to start inference from an existing intermediate state.
+5. **Smallest test:** One verified 50k DIV2K checkpoint with the original UIEB
+   recipe (paired `cold_gray`, seed 42, T=8, 128px crops, factor 1). On four fixed
+   DIV2K validation images, start at t=4,6,7 (50%,25%,12.5% remaining a/b). Default
+   inference never starts at full gray; t=8 is an explicit optional control.
+6. **Failure meaning:** If even partial-color inputs become brown, endpoint
+   ambiguity alone is insufficient; examine training fit and sampler behavior.
+   If only full gray fails, test endpoint supervision next, without claiming
+   that missing semantic color inference has been solved.
+7. **Success continuation:** Only after the small diagnostic, expand the same
+   checkpoint test to Val100 or a separately controlled endpoint-training test.
+8. **Evaluation:** Compare the attenuated input, Direct, Algorithm 2 and reference
+   per image/step using Delta-E76, RGB PSNR and Lab chroma/a/b diagnostics. The
+   input already contains target color information: this is a synthetic
+   diagnostic, not a grayscale-colorization or underwater-restoration score.
+   Include analytical chroma rescaling as a sanity control: partial Lab
+   desaturation is exactly invertible before quantization when retention > 0.
+9. **Budget/stop:** Inference only on four images, no new training launched here.
+   If the required T=8 DIV2K checkpoint is absent, stop and request/prepare that
+   prerequisite explicitly; never substitute UIEB weights or the older T=20
+   DIV2K model. Preserve original output sizes and separate preview folders.
