@@ -28,3 +28,22 @@ def test_all_saturation_command_lists_four_runs_in_order():
     expected = ["sat1_50k", "sat1_25_50k", "sat1_5_50k", "sat2_50k"]
     assert all(fragment in line for fragment, line in zip(expected, lines))
     assert all("--resume-if-exists --max-steps 100000" in line for line in lines)
+
+
+def test_lab_sat1_command_is_explicit_and_resumable():
+    root = Path(__file__).resolve().parents[1]
+    environment = os.environ.copy()
+    environment["DIV2K_DRY_RUN"] = "1"
+    result = subprocess.run(
+        ["bash", "scripts/train_div2k_lab_4090.sh", "--resume-if-exists"],
+        cwd=root,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    lines = [line for line in result.stdout.splitlines() if line.startswith("DRY RUN:")]
+    assert len(lines) == 1
+    assert "div2k_lab_sat1_50k.yaml" in lines[0]
+    assert "--resume-if-exists" in lines[0]

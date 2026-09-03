@@ -39,4 +39,15 @@ natural_args=(
 "$python_bin" train.py "${natural_args[@]}"
 "$python_bin" train.py "${natural_args[@]}" --resume auto --max-steps 4
 
-echo "CUDA SMOKE TEST PASSED: UIEB Lab and DIV2K RGB training/resume both work."
+natural_lab_args=(
+  --config configs/smoke_div2k_lab.yaml
+  --train-dir "$smoke_root/data/raw"
+  --val-dir "$smoke_root/data/reference"
+  --output-dir "$smoke_root/output_div2k_lab"
+  --device cuda
+)
+
+"$python_bin" train.py "${natural_lab_args[@]}"
+"$python_bin" train.py "${natural_lab_args[@]}" --resume auto --max-steps 4
+
+echo "CUDA SMOKE TEST PASSED: UIEB Lab, DIV2K RGB, and DIV2K Lab training/resume work."

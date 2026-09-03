@@ -23,6 +23,10 @@ from .io import append_csv, atomic_torch_save, save_stage_strip, save_trajectory
 from .metrics import delta_e76, psnr, ssim, trajectory_monotonic_fraction
 
 
+ITERATIVE_MODES = {"cold_gray", "natural_rgb_colorization", "natural_lab_colorization"}
+NATURAL_IMAGE_MODES = {"natural_rgb_colorization", "natural_lab_colorization"}
+
+
 def _restore_cuda_rng_states(states):
     """CUDA RNG restoration requires CPU uint8 tensors after checkpoint loading."""
     torch.cuda.set_rng_state_all([state.cpu() for state in states])
@@ -90,7 +94,7 @@ class Trainer:
 
     def _training_pair(self, raw_state, reference_state, anchor):
         batch = reference_state.shape[0]
-        if self.mode in {"cold_gray", "natural_rgb_colorization"}:
+        if self.mode in ITERATIVE_MODES:
             t = torch.randint(1, self.bridge.steps + 1, (batch,), device=self.device)
             model_input = self.bridge.degrade(reference_state, anchor, t)
         elif self.mode == "gray_oneshot":
@@ -107,7 +111,7 @@ class Trainer:
     def predict(self, model, raw_state, anchor, return_trajectory=False):
         batch = raw_state.shape[0]
         full_t = torch.full((batch,), self.bridge.steps, device=self.device, dtype=torch.long)
-        if self.mode in {"cold_gray", "natural_rgb_colorization"}:
+        if self.mode in ITERATIVE_MODES:
             return self.bridge.sample(model, anchor, return_trajectory=return_trajectory)
         model_input = anchor if self.mode == "gray_oneshot" else raw_state
         pred = model(model_input, full_t).clamp(-1, 1)
@@ -146,7 +150,7 @@ class Trainer:
         for key in ("mode", "model", "diffusion"):
             if key in saved_config and saved_config[key] != self.config[key]:
                 raise ValueError(f"resume config mismatch for {key}: {saved_config[key]!r} != {self.config[key]!r}")
-        if self.mode == "natural_rgb_colorization":
+        if self.mode in NATURAL_IMAGE_MODES:
             saved_factor = float(saved_config.get("data", {}).get("saturation_factor", 1.0))
             current_factor = float(self.config.get("data", {}).get("saturation_factor", 1.0))
             if saved_factor != current_factor:

@@ -81,7 +81,11 @@ def main():
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     totals = {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0, "monotonic": 0.0}
-    iterative_modes = {"cold_gray", "natural_rgb_colorization"}
+    iterative_modes = {
+        "cold_gray",
+        "natural_rgb_colorization",
+        "natural_lab_colorization",
+    }
     direct_totals = (
         {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0}
         if config["mode"] in iterative_modes
@@ -223,7 +227,7 @@ def main():
         "split_file": str(split_path.resolve()),
         "split_sha256": hashlib.sha256(split_path.read_bytes()).hexdigest(),
     }
-    if mode == "natural_rgb_colorization":
+    if mode in {"natural_rgb_colorization", "natural_lab_colorization"}:
         metrics["evaluation"]["training_saturation_factor"] = float(
             config.get("data", {}).get("saturation_factor", 1.0)
         )

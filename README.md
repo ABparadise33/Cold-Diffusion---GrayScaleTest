@@ -21,6 +21,16 @@
 | `configs/div2k_rgb_sat1_5_50k.yaml` | DIV2K saturation 1.5 | `outputs/div2k_rgb_sat1_5_50k/` |
 | `configs/div2k_rgb_sat2_50k.yaml` | DIV2K saturation 2.0 | `outputs/div2k_rgb_sat2_50k/` |
 
+另有一組乾淨的色彩空間對照：
+
+| Config | Training target | Color space | Output |
+|---|---|---|---|
+| `configs/div2k_lab_sat1_50k.yaml` | DIV2K 原始色彩，saturation 1.0 | CIE Lab | `outputs/div2k_lab_sat1_50k/` |
+
+它與 RGB saturation 1.0 使用相同 DIV2K、seed、crop、模型、T=20 與 50k
+設定；唯一實驗變因是 RGB bridge 改為先前 UIEB 實驗的 Lab bridge
+`reference Lab -> (L_raw, 0, 0)`。
+
 這些倍率不是 HSV 濾鏡，也不會改寫硬碟上的 PNG。每次載入 crop 後即時計算：
 
 ```text
@@ -205,6 +215,30 @@ UIEB reference 只參與評測，不會進入模型 input。每組輸出 90 張 
 90 張 Direct、90 張 reference，以及完整指標 CSV。輸出資料夾分別標示為
 `1.00x`、`1.25x`、`1.50x`、`2.00x`。Trajectory 預覽會由左到右輸出 T=20
 的完整 reverse process。
+
+## DIV2K saturation 1.0：CIE Lab 對照
+
+開始或從現有 `latest.pt` 續訓：
+
+```bash
+bash scripts/train_div2k_lab_4090.sh --resume-if-exists
+```
+
+若 VRAM 不足，維持 effective batch 16：
+
+```bash
+DIV2K_BATCH_SIZE=8 DIV2K_GRAD_ACCUM=2 \
+  bash scripts/train_div2k_lab_4090.sh --resume-if-exists
+```
+
+訓練完成後，以相同 UIEB seed-42 Test 90、原始解析度與完整指標評測：
+
+```bash
+bash scripts/evaluate_div2k_lab_uieb_4090.sh
+```
+
+訓練輸出為 `outputs/div2k_lab_sat1_50k/`，評測輸出為
+`evaluation/div2k_lab_sat_1.00x_uieb/`，不會覆蓋先前 RGB 實驗。
 
 ## 記憶體不足時
 

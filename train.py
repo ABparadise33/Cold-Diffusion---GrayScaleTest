@@ -65,10 +65,11 @@ def main():
         )
 
     image_size = int(config["data"]["image_size"])
-    if config["mode"] == "natural_rgb_colorization":
+    natural_image_modes = {"natural_rgb_colorization", "natural_lab_colorization"}
+    if config["mode"] in natural_image_modes:
         if not args.train_dir or not args.val_dir:
             raise SystemExit(
-                "ERROR: natural_rgb_colorization requires --train-dir and --val-dir"
+                f"ERROR: {config['mode']} requires --train-dir and --val-dir"
             )
         saturation_factor = float(config["data"].get("saturation_factor", 1.0))
         train_dataset = NaturalImageDataset(

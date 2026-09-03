@@ -108,3 +108,16 @@ target changes.
   not saturation alone. A later ablation may move chroma scaling to Lab, HSV, or
   another gamut-aware color space, but that change must remain separate from
   this first RGB baseline.
+
+### CIE Lab factor-1 control
+
+The RGB sweep produced a strong warm/brown UIEB bias. Before attributing that
+result to natural-image training itself, run one controlled factor-1 model in
+the earlier UIEB Lab representation. Keep DIV2K, saturation 1.0, seed 42,
+128px crops, T=20, architecture, optimizer, effective batch, validation cadence,
+and 50k cap unchanged; change only the state representation and gray endpoint
+from RGB channel mean to `(L, 0, 0)`. Evaluate the RGB and Lab checkpoints on
+the same DIV2K validation images and UIEB Test 90. If Lab is also brown on
+UIEB while remaining credible on DIV2K, the natural-to-underwater domain shift
+or grayscale information bottleneck—not RGB saturation scaling—is the likely
+failure mechanism.
