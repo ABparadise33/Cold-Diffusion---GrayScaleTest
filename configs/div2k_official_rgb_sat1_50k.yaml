@@ -1,0 +1,38 @@
+experiment: div2k_official_rgb_sat1_50k
+mode: official_rgb_colorization
+seed: 42
+output_dir: outputs/div2k_official_rgb_sat1.00x_50k
+
+data:
+  image_size: 128
+  num_workers: 4
+  saturation_factor: 1.0
+  validation_preview_name: '0803'
+
+model:
+  architecture: upstream_convnext
+  dim: 64
+  dim_mults: [1, 2, 4, 8]
+
+diffusion:
+  steps: 20
+  sampler: paper_algorithm2
+
+training:
+  max_steps: 50000
+  # 4090 conservative microbatch; equivalent effective32 to upstream128px16x2.
+  batch_size: 4
+  grad_accum: 8
+  learning_rate: 0.00002
+  ema_decay: 0.995
+  ema_update_every: 10
+  ema_start_step: 2000
+  amp: false
+  log_every: 50
+  validate_every: 1000
+  save_every: 1000
+  checkpoint_milestone_every: 50000
+  min_free_disk_gb: 5
+  preview_tile_size: 256
+  preview_tile_overlap: 32
+  preview_max_side: 512

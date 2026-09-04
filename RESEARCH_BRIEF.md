@@ -1,5 +1,47 @@
 # Research brief
 
+## Active gate: paper-aligned full-gray RGB baseline (2026-09-04)
+
+1. **Question/motivation:** Can a source-aligned Cold Diffusion colorizer learn
+   diverse DIV2K colors from full gray? A credible baseline is necessary before
+   interpreting underwater transfer, saturation scaling, or negative results.
+2. **Hypothesis:** The official ConvNeXt/attention restoration network and its
+   own-prediction RGB degradation yield a stronger full-gray baseline than our
+   custom fixed-anchor/small-UNet runs. This changes multiple implementation
+   choices and is a baseline repair, not an isolated causal ablation.
+3. **Limitation:** Prior RGB factor1 forward states match the paper, but the
+   sampler, model size, EMA warmup, training budget and data do not all match.
+   Partial-color inversion is not a full-gray colorization test.
+4. **Leverage:** Pin upstream commit f8b1379151ff0cccba49112cf61d439bd4dd4ad9;
+   preserve its default ConvNeXt/linear-attention network and time embedding.
+   Use D(x,s)=(1-s/T)x+(s/T)mean_RGB(x), with no reverse-state clamp.
+5. **Smallest test:** CPU analytic/operator/gradient/resume smoke first, then a
+   fresh DIV2K800 run, factor1, seed42, 128px crops, T20, Adam2e-5, FP32,
+   effective batch32, EMA .995 after upstream-style 2k warmup. Stop at 50k for
+   review; this is not a claimed replication of the paper's 700k data budget.
+6. **Failure meaning:** A continuing sepia bias does not establish that the
+   paper is wrong or that insufficient diversity/capacity/training is excluded.
+   Direct-versus-sampler tests isolate inference only, not learned weights.
+7. **Success continuation:** Review full-gray in-domain validation before
+   authorizing more steps, saturation >1, larger data, or underwater transfer.
+8. **Evaluation:** All100 fixed DIV2K center crops; Direct/Algorithm2, validation
+   L1, RGB PSNR/SSIM, Delta-E76, chroma relative to target and gray control.
+   Each1k save a fixed full-scene validation image using explicitly recorded
+   tiled inference, preserving the standalone PNG's original geometry. Keep
+   horizontal batch/trajectory previews in separate directories.
+9. **Budget/stop:** No paid training launched locally. 50k cap, resumable only
+   with compatible new-baseline weights; no reuse of old UIEB/DIV2K checkpoints.
+   Reassess at 5k/10k using color evidence, not PSNR alone. Retain latest/best
+   and final numbered checkpoint; do not accumulate every large 5k checkpoint.
+
+Indexing contract: public state s=1..T maps to upstream model label t=s-1.
+Default `paper_algorithm2` implements all T paper updates. The explicitly
+named `official_code` evaluation control reproduces the inspected source's
+T model calls / T-1 effective updates (last call is a no-op). Never silently
+mix the two or label this DIV2K50k adaptation a complete CIFAR/CelebA700k
+reproduction. Earlier research sections below are historical plans, not proof
+of upstream fidelity or current authorization to run saturation sweeps.
+
 ## Question and motivation
 
 Can a raw underwater image be projected to a grayscale anchor and then restored

@@ -1,5 +1,26 @@
 # Cold Diffusion - GrayScaleTest
 
+## 目前先跑：官方 RGB 全灰階 baseline，飽和度 1
+
+舊版是自訂小 U-Net／固定 gray(raw) bridge，**不是官方 colorization 完整復現**。
+這次新增獨立官方 ConvNeXt/attention 模型＋RGB退化，從全灰階開始，DIV2K、50k、
+飽和度1，從零訓練。舊版與舊結果不覆蓋。
+
+現有環境更新並測試後：
+
+```bash
+.venv/bin/python -m pip install 'einops>=0.6,<1'
+.venv/bin/python -m pytest -q tests/test_official_colorization.py
+.venv/bin/python tools/check_official_baseline.py --device cuda
+bash scripts/train_official_div2k_4090.sh
+```
+
+輸出：`outputs/div2k_official_rgb_sat1.00x_50k/`，每1k存固定驗證照片、色彩指標與曲線。
+**先不要跑下方舊版飽和度sweep。** 完整設定、來源、論文／官方索引差異、續訓與評測：
+[官方 baseline 說明](docs/official_colorization.md)。這是DIV2K50k適配，不是CIFAR/CelebA700k復現。
+
+## 以下保留舊實驗說明
+
 50k-step 小型實驗，驗證：
 
 > 水下退化影像先到灰階 anchor，再逐步加回亮度與色彩資訊時，Cold

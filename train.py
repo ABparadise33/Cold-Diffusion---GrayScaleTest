@@ -7,11 +7,10 @@ import torch
 from torch.utils.data import DataLoader
 import yaml
 
-from gray_cold_diffusion.bridge import GrayBridge
 from gray_cold_diffusion.data import NaturalImageDataset, PairedImageDataset, seed_worker
 from gray_cold_diffusion.engine import Trainer
+from gray_cold_diffusion.factory import NATURAL_MODES, OFFICIAL_MODE, build_model_and_bridge
 from gray_cold_diffusion.io import select_device, set_seed
-from gray_cold_diffusion.model import RestorationUNet
 
 
 def parse_args():
@@ -65,8 +64,10 @@ def main():
         )
 
     image_size = int(config["data"]["image_size"])
-    natural_image_modes = {"natural_rgb_colorization", "natural_lab_colorization"}
-    if config["mode"] in natural_image_modes:
+    if config["mode"] == OFFICIAL_MODE:
+        from gray_cold_diffusion.official_training import preflight_official_run
+        preflight_official_run(config, args)
+    if config["mode"] in NATURAL_MODES:
         if not args.train_dir or not args.val_dir:
             raise SystemExit(
                 f"ERROR: {config['mode']} requires --train-dir and --val-dir"
@@ -129,16 +130,15 @@ def main():
     train_loader = DataLoader(train_dataset, shuffle=True, drop_last=True, **loader_args)
     val_loader = DataLoader(val_dataset, shuffle=False, drop_last=False, **loader_args)
 
-    model_cfg = config["model"]
-    steps = int(config["diffusion"]["steps"])
-    model = RestorationUNet(
-        base_channels=int(model_cfg["base_channels"]),
-        channel_mults=tuple(model_cfg["channel_mults"]),
-        dropout=float(model_cfg.get("dropout", 0.0)),
-        diffusion_steps=steps,
-    )
+    if len(train_dataset) < loader_args["batch_size"]:
+        raise ValueError("training set is smaller than batch size (drop_last would yield no batches)")
+    model, bridge = build_model_and_bridge(config)
     print(f"parameters={sum(p.numel() for p in model.parameters()):,}")
-    trainer = Trainer(model, GrayBridge(steps), train_loader, val_loader, config, device)
+    trainer_class = Trainer
+    if config["mode"] == OFFICIAL_MODE:
+        from gray_cold_diffusion.official_training import OfficialTrainer
+        trainer_class = OfficialTrainer
+    trainer = trainer_class(model, bridge, train_loader, val_loader, config, device)
 
     if args.resume:
         resume_path = Path(config["output_dir"]) / "checkpoints" / "latest.pt" if args.resume == "auto" else Path(args.resume)

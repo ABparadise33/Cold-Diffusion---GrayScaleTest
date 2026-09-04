@@ -9,7 +9,6 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from gray_cold_diffusion.bridge import GrayBridge
 from gray_cold_diffusion.color import (
     denormalize_rgb,
     gray_anchor,
@@ -26,7 +25,9 @@ from gray_cold_diffusion.extended_metrics import (
 )
 from gray_cold_diffusion.io import save_stage_strip, save_tensor_image, save_trajectory_grid, select_device
 from gray_cold_diffusion.metrics import delta_e76, psnr, ssim, trajectory_monotonic_fraction
-from gray_cold_diffusion.model import RestorationUNet
+from gray_cold_diffusion.factory import (
+    ITERATIVE_MODES, NATURAL_MODES, OFFICIAL_MODE, RGB_MODES, build_model_and_bridge,
+)
 from gray_cold_diffusion.report import save_training_report
 from gray_cold_diffusion.tiling import TiledModel
 
@@ -34,6 +35,8 @@ from gray_cold_diffusion.tiling import TiledModel
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--sampler", choices=["paper_algorithm2", "official_code"],
+                        help="official baseline only; override sampling, never weights or training")
     parser.add_argument("--raw-dir", required=True)
     parser.add_argument("--reference-dir", required=True)
     parser.add_argument("--split-file", required=True)
@@ -75,15 +78,19 @@ def main():
     checkpoint_path = Path(args.checkpoint)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     config = checkpoint["config"]
-    model_cfg = config["model"]
     steps = int(config["diffusion"]["steps"])
-    model = RestorationUNet(
-        int(model_cfg["base_channels"]), tuple(model_cfg["channel_mults"]),
-        float(model_cfg.get("dropout", 0.0)), steps,
-    ).to(device)
+    if args.sampler:
+        if config["mode"] != OFFICIAL_MODE:
+            parser.error("--sampler applies only to new official baseline checkpoints")
+        config["diffusion"]["sampler"] = args.sampler
+    if config["mode"] == OFFICIAL_MODE:
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+    model, bridge = build_model_and_bridge(config)
+    model = model.to(device)
     model.load_state_dict(checkpoint["ema"])
     model.eval()
-    bridge = GrayBridge(steps).to(device)
+    bridge = bridge.to(device)
     if args.original_size and args.batch_size != 1:
         parser.error("--original-size requires --batch-size 1 because UIEB image sizes vary")
     if args.tile_size is not None:
@@ -105,11 +112,7 @@ def main():
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     totals = {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0, "monotonic": 0.0}
-    iterative_modes = {
-        "cold_gray",
-        "natural_rgb_colorization",
-        "natural_lab_colorization",
-    }
+    iterative_modes = ITERATIVE_MODES
     direct_totals = (
         {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0}
         if config["mode"] in iterative_modes
@@ -117,6 +120,8 @@ def main():
     )
     count = 0
     output = Path(args.output_dir)
+    if config["mode"] == OFFICIAL_MODE and output.exists() and any(output.iterdir()):
+        raise FileExistsError(f"official evaluation output already exists: {output}; choose a new directory")
     output.mkdir(parents=True, exist_ok=True)
     metrics_path = (
         Path(args.training_metrics)
@@ -145,7 +150,7 @@ def main():
             raw = batch["raw"].to(device)
             reference = batch["reference"].to(device)
             target_lab = rgb_to_normalized_lab(reference)
-            if mode == "natural_rgb_colorization":
+            if mode in RGB_MODES:
                 raw_state = normalize_rgb(raw)
                 anchor = rgb_channel_mean_gray(raw_state)
                 state_to_rgb = denormalize_rgb
@@ -198,7 +203,7 @@ def main():
                 direct_totals["ssim"] += batch_direct_ssim.sum().item()
                 direct_totals["delta_e76"] += batch_direct_delta_e.sum().item()
             count += raw.shape[0]
-            if args.extended_metrics:
+            if args.extended_metrics or mode == OFFICIAL_MODE:
                 for image_index, name in enumerate(batch["name"]):
                     save_tensor_image(pred[image_index], prediction_dir / f"{name}.png")
                     save_tensor_image(reference[image_index], evaluation_reference_dir / f"{name}.png")
@@ -218,7 +223,8 @@ def main():
                     break
                 stages = [("raw", raw), ("gray", state_to_rgb(anchor))]
                 if direct is not None:
-                    stages.extend([("direct", direct), ("Algorithm 2", pred)])
+                    label = config["diffusion"]["sampler"] if mode == OFFICIAL_MODE else "Algorithm 2"
+                    stages.extend([("direct", direct), (label, pred)])
                 else:
                     stages.append(("prediction", pred))
                 stages.append(("reference", reference))
@@ -256,7 +262,7 @@ def main():
         "split_file": str(split_path.resolve()),
         "split_sha256": hashlib.sha256(split_path.read_bytes()).hexdigest(),
     }
-    if mode in {"natural_rgb_colorization", "natural_lab_colorization"}:
+    if mode in NATURAL_MODES:
         metrics["evaluation"]["training_saturation_factor"] = float(
             config.get("data", {}).get("saturation_factor", 1.0)
         )
@@ -264,6 +270,16 @@ def main():
         metrics["evaluation"]["training_reference_lab_saturation_factor"] = float(
             config["data"]["reference_saturation_factor"]
         )
+
+    if mode == OFFICIAL_MODE:
+        metrics["evaluation"].update({
+            "mode": mode, "sampler": config["diffusion"]["sampler"],
+            "diffusion_steps": steps, "start": "full_gray",
+            "effective_reverse_updates": steps if bridge.sampler == "paper_algorithm2" else steps - 1,
+            "checkpoint_implementation": config.get("implementation"),
+        })
+    # Persist core evidence before optional metric models/downloads can fail.
+    (output / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 
     if args.extended_metrics:
         del inference_model, model, bridge

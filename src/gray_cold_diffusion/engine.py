@@ -21,10 +21,10 @@ from .color import (
 )
 from .io import append_csv, atomic_torch_save, save_stage_strip, save_trajectory_grid, update_ema
 from .metrics import delta_e76, psnr, ssim, trajectory_monotonic_fraction
+from .factory import ITERATIVE_MODES, NATURAL_MODES, RGB_MODES
 
 
-ITERATIVE_MODES = {"cold_gray", "natural_rgb_colorization", "natural_lab_colorization"}
-NATURAL_IMAGE_MODES = {"natural_rgb_colorization", "natural_lab_colorization"}
+NATURAL_IMAGE_MODES = NATURAL_MODES
 
 
 def _restore_cuda_rng_states(states):
@@ -42,7 +42,7 @@ class Trainer:
         self.config = config
         self.device = device
         self.mode = config["mode"]
-        self.color_space = "rgb" if self.mode == "natural_rgb_colorization" else "lab"
+        self.color_space = "rgb" if self.mode in RGB_MODES else "lab"
         self.output = Path(config["output_dir"])
         self.output.mkdir(parents=True, exist_ok=True)
         train_cfg = config["training"]
@@ -253,13 +253,16 @@ class Trainer:
             )
         return metrics
 
+    def step_ema(self):
+        cfg = self.config["training"]
+        if self.step % int(cfg["ema_update_every"]) == 0:
+            update_ema(self.ema, self.model, float(cfg["ema_decay"]))
+
     def train(self):
         train_cfg = self.config["training"]
         log_every = int(train_cfg["log_every"])
         validate_every = int(train_cfg["validate_every"])
         save_every = int(train_cfg["save_every"])
-        ema_decay = float(train_cfg["ema_decay"])
-        ema_every = int(train_cfg["ema_update_every"])
         running = []
         start = time.time()
         self.optimizer.zero_grad(set_to_none=True)
@@ -281,8 +284,7 @@ class Trainer:
             self.scaler.update()
             self.optimizer.zero_grad(set_to_none=True)
             self.step += 1
-            if self.step % ema_every == 0:
-                update_ema(self.ema, self.model, ema_decay)
+            self.step_ema()
             running.append(sum(step_losses) / len(step_losses))
 
             if self.step % log_every == 0:
