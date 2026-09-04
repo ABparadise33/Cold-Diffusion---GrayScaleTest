@@ -39,6 +39,7 @@ def sample_from_step(
 
 def check_diagnostic_checkpoint(
     config: dict, baseline: dict, step: int, expected_step: int, *, color_space: str = "lab",
+    expected_saturation_factor: float = 1.0,
 ):
     """Refuse a different experiment, representation, recipe, or checkpoint age."""
     mismatches = []
@@ -49,8 +50,14 @@ def check_diagnostic_checkpoint(
     expected_data = baseline.get("data", {})
     if data.get("image_size") != expected_data.get("image_size"):
         mismatches.append("data.image_size")
+    if expected_saturation_factor not in (1.0, 1.25, 1.5, 2.0):
+        raise ValueError("unsupported diagnostic saturation factor")
+    if color_space != "rgb" and expected_saturation_factor != 1.0:
+        raise ValueError("higher-saturation diagnostics currently require RGB")
     for key in ("saturation_factor", "reference_saturation_factor"):
-        if float(data.get(key, 1.0)) != 1.0:
+        expected_factor = expected_saturation_factor if key == "saturation_factor" else 1.0
+        if (float(data.get(key, 1.0)) != expected_factor
+                or float(expected_data.get(key, 1.0)) != expected_factor):
             mismatches.append(f"data.{key}")
     training = config.get("training", {})
     expected_training = baseline.get("training", {})

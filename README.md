@@ -434,6 +434,58 @@ RGB factor-1、設定與實際訓練步數，找不到就停止，不自動重�
 不要自動啟動其他倍率。之後比較四組 RGB 權重時，必須使用完全相同、從原圖建立
 的輸入，不能分別從各自增彩度後的 GT 建立輸入。
 
+### UIEB 水下影像：一次比較 RGB 1／1.25／1.5／2 倍
+
+RGB 部分色彩診斷通過後，使用已訓練好的四組權重，不重訓：
+
+```bash
+git pull &&
+bash scripts/evaluate_rgb_partial_uieb_4090.sh all
+```
+
+- 固定 Underwater_FlowIE 相同的 seed42 Test90；四組都從相同 **UIEB raw** 建立輸入。
+- 先固定 **t=15、保留 25% 的 `raw-gray`**，只比較訓練倍率，不同時改起點。
+  這也保留了部分水下偏色，並不代表保留 25% 的正確 GT 色彩。
+- 讀取 `outputs/div2k_rgb_sat{1,1_25,1_5,2}_50k/checkpoints/step_050000.pt`；
+  執行前核對四組實際步數、倍率與設定，缺檔就停止，不改用 `best.pt`。
+- GT 只用於評分／展示，不進模型；不依倍率重新調整推論輸入、輸出或 GT。
+- 每組輸出 90 張原尺寸 Direct 與 Algorithm 2；內部 512/64 tiling，沒有正方形
+  resize。固定 seed42 的 4 張另外輸出原尺寸 batch、由左往右 trajectory 與四倍率並排圖。
+- 預設計算既有 14 項 extended 指標（內部 256px 相容設定）及原尺寸核心指標。
+  首次使用 IQA 可能下載評分模型；加 `--skip-extended-metrics` 可先只看圖片與核心分數。
+
+結果：
+
+```text
+evaluation/rgb_partial_uieb_test90_step050000/
+  saturation_comparison.csv / .md / .json   # 四組 × Direct／Algorithm 2 總表
+  comparisons/retain_25pct/                 # 同圖跨倍率並排：algorithm2/、direct/
+  sat_1.00x/                               # 其餘為 sat_1.25x/、sat_1.50x/、sat_2.00x/
+    metrics.json / run_metadata.json / per_image_metrics.csv
+    raw/ / references/
+    retain_25pct/
+      inputs/ / direct_predictions/ / predictions/   # 各 90 張
+      batches/ / trajectories/                       # 各 4 張
+```
+
+先看「比未處理 raw 有沒有進步」，不能只看是否比退色輸入更好。總表的
+`delta_e_improvement_over_raw` 大於 0 才表示色差優於 raw；解析反轉對照只會還原
+raw，不會自動修正水下偏色。高倍率也可能放大錯誤色相／clipping，結果是待驗證的
+水下泛化實驗，不預設能修復成功。
+
+若要再比較三個起點，使用新目錄保留前一次結果：
+
+```bash
+bash scripts/evaluate_rgb_partial_uieb_4090.sh all \
+  --start-steps 10 15 18 \
+  --output-dir evaluation/rgb_partial_uieb_three_starts_step050000
+```
+
+要全部 90 張 batch／trajectory 可加 `--preview-count 90`，但會增加磁碟用量。
+目錄非空時會停止，避免覆蓋；checkpoint 根目錄可用 `RGB_CHECKPOINT_ROOT` 指定，
+資料路徑可用 `UIEB_RAW_DIR`、`UIEB_REFERENCE_DIR`、`UIEB_SPLIT_FILE` 指定。
+即使換 split 路徑，仍會核對相同 Test90 配對；四組完成後也會核對輸入與 GT 雜湊。
+
 ### 舊 T=20 Lab/RGB 模型的 DIV2K 全灰評測
 
 以官方 validation `0801.png`–`0900.png` 全部 100 張作為 input 與 reference，

@@ -1,4 +1,4 @@
-"""Diagnose partial RGB color using an existing factor-1 RGB checkpoint."""
+"""Diagnose partial RGB color using an existing, explicitly checked RGB checkpoint."""
 
 from gray_cold_diffusion.chroma_diagnostic import main
 

@@ -200,3 +200,39 @@ Lab-chroma factors until the fixed preview passes visual inspection.
 - **Budget/stop:** Four images, inference only. Reject wrong mode, saturation,
   training step or config; stop on a failed sanity control. Do not scale to
   Val100, UIEB, or additional saturation models automatically.
+
+## UIEB raw-only RGB saturation transfer (2026-09-04)
+
+1. **Question/motivation:** Do the four existing DIV2K RGB saturation priors
+   correct underwater color rather than simply undo artificial desaturation?
+   This is the first paired underwater test of the partial-color approach.
+2. **Hypothesis:** At a fixed raw-derived input and timestep, a higher training
+   saturation factor improves reference color/perceptual error over factor 1
+   AND over leaving raw unchanged, without simply amplifying its color cast.
+3. **Limitation:** Natural self-desaturation is analytically invertible and
+   retains correct target hues; underwater raw contains wrong hues and haze.
+4. **Leverage:** Reuse RGB factors 1/1.25/1.5/2, each at training step 50000 and
+   T=20. The fixed Underwater_FlowIE-compatible UIEB seed42 Test90 is available.
+5. **Smallest real test:** Default to t=15 (25% retained RGB-gray) for all four
+   models and all 90 fixed test images. No new training. Other starts may be
+   explicitly selected, but the default changes only the checkpoint factor.
+6. **Failure meaning:** If outputs merely approach raw or worsen paired color
+   error, the test has not demonstrated enhancement. Higher chroma alone is not
+   success. Training-target RGB gamut clipping remains a confound, especially
+   at factor 2, and is not removed by this evaluation.
+7. **Success continuation:** Inspect differences by image, compare the frozen
+   baselines, and validate on another fixed split/dataset before retraining.
+   Results on Test90 are exploratory if later used to choose a factor.
+8. **Evaluation:** Construct both x_t and gray anchor exclusively from raw,
+   before any factor-specific changes. GT is unchanged and used only for
+   scoring/side-by-side display. Compare raw, analytic inversion (recovers raw,
+   NOT GT), Direct and Algorithm 2; record RGB PSNR/SSIM, Delta-E76, chroma,
+   output-minus-raw changes and color-error trajectory monotonicity. Reuse the
+   existing 14-metric FlowIE evaluator at legacy 256px metric size while saved
+   predictions remain original-size. Verify identical raw-derived input and
+   reference hashes across models and export a combined factor table.
+9. **Budget/stop:** Four sequential inference runs, one default start each,
+   no model training or dataset downloads. Save all 90 predictions per model,
+   but only four fixed comparison/trajectory examples unless requested. Stop
+   on checkpoint/config/split mismatches or leakage checks; never silently
+   substitute best.pt or an earlier checkpoint. Reassess after this sweep.
