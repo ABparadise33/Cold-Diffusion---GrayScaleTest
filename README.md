@@ -15,6 +15,15 @@
 bash scripts/train_official_div2k_4090.sh
 ```
 
+想先自動試 batch 上限、OOM 就降一級，再開始訓練：
+
+```bash
+bash scripts/train_official_div2k_4090.sh --auto-batch
+```
+
+測32→16→8→4→2→1，保留顯存餘裕、有效batch固定32。測試與正式訓練分開；
+非OOM錯誤不會被忽略。**上述兩個訓練指令擇一，不要同時跑。**
+
 輸出：`outputs/div2k_official_rgb_sat1.00x_50k/`，每1k存固定驗證照片、色彩指標與曲線。
 **先不要跑下方舊版飽和度sweep。** 完整設定、來源、論文／官方索引差異、續訓與評測：
 [官方 baseline 說明](docs/official_colorization.md)。這是DIV2K50k適配，不是CIFAR/CelebA700k復現。

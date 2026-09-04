@@ -13,7 +13,7 @@ from gray_cold_diffusion.factory import NATURAL_MODES, OFFICIAL_MODE, build_mode
 from gray_cold_diffusion.io import select_device, set_seed
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--raw-dir")
@@ -34,7 +34,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--grad-accum", type=int)
     parser.add_argument("--num-workers", type=int)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main():

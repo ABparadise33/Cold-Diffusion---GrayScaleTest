@@ -48,6 +48,40 @@ CIFAR-10／CelebA 700k 復現。仍有 DIV2K、128px random crops/flip、較少�
 OFFICIAL_BATCH_SIZE=2 OFFICIAL_GRAD_ACCUM=16 bash scripts/train_official_div2k_4090.sh
 ```
 
+### 自動找能跑的 batch（新增）
+
+```bash
+bash scripts/train_official_div2k_4090.sh --auto-batch
+```
+
+先在**獨立測試程序**依序測 `32 → 16 → 8 → 4 → 2 → 1`。確定 CUDA OOM
+就結束該程序、完全釋放它的顯存，再往下試。挑第一個能通過、且保留
+`max(2 GiB, 顯卡容量10%)` 餘裕的 batch，自動設定 `grad_accum = 32 / batch`，
+之後才開始正式訓練。因此有效batch仍是32，不改學習率、模型、飽和度與50k上限。
+
+試跑包含3次合成資料 optimizer update、gradient accumulation、Adam狀態、EMA、
+全灰階crop驗證與trajectory指標。它使用真實模型和128px尺寸，但不是完整DIV2K
+或完整場景preview壓力測試；保留顯存餘裕仍不保證其他程序搶顯存時永遠不OOM。
+選出的是**能通過的最大候選batch**，不是任意整數的極限，也不保證是最快batch。
+為維持有效batch32，不測64以上。
+
+**只有CUDA OOM或顯存餘裕不足會繼續試。** Shape mismatch、NaN、worker被kill、
+逾時等其他錯誤會停止，不會被當成OOM吞掉。正式訓練開始後不做自動降batch／重跑。
+原本的訓練如果已在跑，不要同時啟動此指令；先讓它保存checkpoint並停止。
+
+探測紀錄在 `outputs/batch_probes/official_<時間>_<唯一ID>/`：
+`batch_probe.json` 記錄每次結果、峰值顯存、選定batch和正式訓練command；
+`batch_<大小>/worker.log` 保留錯誤原文。探測不存模型權重、不動原訓練輸出。
+
+已存在這次baseline的權重時，明確續訓：
+
+```bash
+bash scripts/train_official_div2k_4090.sh --auto-batch --resume --max-steps 100000
+```
+
+這仍只是續訓指令範例，不自動增加訓練預算。`--auto-batch` 不能與手動
+`OFFICIAL_BATCH_SIZE`／`OFFICIAL_GRAD_ACCUM` 或 `--batch-size`／`--grad-accum` 混用。
+
 4090 完整 batch 的 VRAM／時間尚待 instance 實測；不要用 CPU smoke 推估。
 進度列會顯示 step/s、ETA 與 peak allocated VRAM；驗證也有額外耗時。
 

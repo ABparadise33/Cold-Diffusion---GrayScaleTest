@@ -42,6 +42,20 @@ mix the two or label this DIV2K50k adaptation a complete CIFAR/CelebA700k
 reproduction. Earlier research sections below are historical plans, not proof
 of upstream fidelity or current authorization to run saturation sweeps.
 
+### Pre-training batch-fit gate (2026-09-04)
+
+User requests trying a larger batch and falling back after OOM. Test descending
+divisors of effective batch32 (32/16/8/4/2/1), each in an isolated subprocess,
+using the actual FP32 model, Adam state, EMA, gradient accumulation and full-gray
+crop validation. Three synthetic optimizer steps are a memory-fit smoke, not
+quality evidence or a throughput optimum. Require max(2GiB,10% device capacity)
+memory headroom. Only a typed CUDA OOM or insufficient headroom permits retry;
+unrelated errors, worker termination and timeout stop the launcher. Select the
+largest passing divisor and set accumulation=32/batch before starting the real
+fresh/resume command. No dataset/weights/steps/LR changes and no automatic
+restart of an already-running training process. Store every attempt and chosen
+configuration outside the training output to preserve fresh-run safeguards.
+
 ## Question and motivation
 
 Can a raw underwater image be projected to a grayscale anchor and then restored
