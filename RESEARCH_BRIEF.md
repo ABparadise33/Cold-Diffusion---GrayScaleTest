@@ -173,3 +173,30 @@ Lab-chroma factors until the fixed preview passes visual inspection.
    checkpoint's T=20 time labels, verify its embedded training step and Lab
    config, and never substitute UIEB or RGB weights. Preserve original output
    sizes and separate preview folders.
+
+## RGB factor-1 intermediate-start control (2026-09-04)
+
+- **Question/motivation:** Does the existing RGB factor-1 model also avoid sepia
+  when color evidence remains? This tests whether the Lab observation extends
+  to the already-trained RGB saturation experiments without new GPU training.
+- **Hypothesis/limitation:** Partial RGB inputs will recover diverse colors;
+  the Lab result alone cannot establish that, because both representation and
+  grayscale operator differ. Percentages are path coefficients, not identical
+  perceptual color strengths across RGB and Lab.
+- **Leverage/minimal test:** Existing `div2k_rgb_sat1_50k` EMA at step 50000,
+  original T=20. Use the same seed42 four DIV2K validation images, RGB
+  channel-mean anchor, t=10/15/18 (50%/25%/10% color difference retained), plus
+  t=20 full-gray control on the exact same checkpoint. No Lab normalization of
+  RGB weights, no saturation edit, no new training.
+- **Evaluation:** Preserve original geometry and 512/64 tiling. Compare input,
+  Direct, Algorithm 2, analytic inverse, reference and actual-t trajectories;
+  record RGB PSNR, Delta-E76, Lab chroma and a/b means. Inputs come from the
+  unmodified factor-1 source. For r>0, `g + (input-g)/r` is an almost exact
+  nonlearned inverse; success is diagnostic, not a restoration benchmark.
+- **Failure/success:** If RGB remains brown from partial inputs, investigate
+  its weights/fit/path before a sweep. If it restores color, next compare the
+  existing RGB saturation models with identical source-derived inputs, not
+  factor-specific target-derived inputs; this follow-on is not launched here.
+- **Budget/stop:** Four images, inference only. Reject wrong mode, saturation,
+  training step or config; stop on a failed sanity control. Do not scale to
+  Val100, UIEB, or additional saturation models automatically.

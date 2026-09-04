@@ -380,6 +380,60 @@ bash scripts/diagnose_div2k_lab_4090.sh --include-gray-control \
 若有色彩提示仍被推成褐色，就不能只怪全灰資訊不足；若只在全灰失敗，下一步才
 分開測試增加全灰訓練比例。單次實驗不保證已找出唯一原因。
 
+### RGB 1 倍不全灰診斷：使用既有權重，不重訓
+
+先只測原本的 RGB 1 倍模型，不跑 1.25／1.5／2，也不把 RGB 權重放進 Lab 流程。
+需要已有 `outputs/div2k_rgb_sat1_50k/checkpoints/step_050000.pt`。
+
+```bash
+git pull &&
+bash scripts/diagnose_div2k_rgb_4090.sh
+```
+
+- 與 Lab 診斷相同 seed42、同四張 DIV2K validation：0804、0815、0882、0895。
+- 同樣使用 checkpoint **實際 step=50000、原 T=20**；不使用步數不確定的 best.pt。
+- 從 t=10／15／18 開始，保留 50%／25%／10% 的 `RGB-gray`；另外預設加上
+  t=20 全灰對照，四張 × 四條路徑共 16 組。
+- 不改訓練、不放大目標飽和度，不下載額外模型。保留原尺寸，內部 512/64 tiling；
+  `batches/` 與 `trajectories/` 分開存放，軌跡由左往右。
+
+RGB 使用訓練時相同的 channel-mean 灰階（不是亮度加權灰階、也不是 Lab）：
+
+```text
+g = mean(R, G, B)，三個通道都填同一個值
+x_t = g + (1-t/20) * (x0-g)
+模型輸入：RGB [0,1] → [-1,1]
+模型輸出：[-1,1] → RGB [0,1]
+```
+
+Algorithm 2 使用固定 `g` 與原始 timestep；解析反轉對照為
+`g + (x_t-g)/(1-t/20)`（全灰時不存在此反轉）。Lab 只用於計算色差、C* 和 a/b
+統計，不參與 RGB 模型的輸入或反向更新。RGB 50% 與 Lab 50% 的退色圖片不完全
+相同，不能將跨色彩空間的差距歸因於單一因素。
+
+結果目錄：
+
+```text
+evaluation/div2k_rgb_sat_1.00x_partial_t20_step050000/
+  run_metadata.json          # 色彩空間、checkpoint SHA256、實際 step、程式版本、圖片名單
+  metrics.json               # 各起點 input／Direct／Algorithm 2 色差、RGB PSNR、彩度統計
+  per_image_metrics.csv
+  references/
+  retain_50pct/              # inputs / direct_predictions / predictions / batches / trajectories
+  retain_25pct/
+  retain_10pct/
+  retain_0pct/               # 同一個 checkpoint 的全灰對照
+```
+
+若 checkpoint 放在別處，使用 `RGB_DIAGNOSTIC_CHECKPOINT` 指定實際路徑；仍會檢查
+RGB factor-1、設定與實際訓練步數，找不到就停止，不自動重訓。若結果目錄已存在且
+非空，請加 `--output-dir evaluation/div2k_rgb_sat1_partial_repeat`，不會覆蓋舊結果。
+
+**這仍是自然圖自行退色再還原的診斷，不是水下修復驗證。** 先檢查是否恢復正確
+色相，以及 Direct 與 Algorithm 2 的差異；若部分色彩仍偏褐色，先分析原因，
+不要自動啟動其他倍率。之後比較四組 RGB 權重時，必須使用完全相同、從原圖建立
+的輸入，不能分別從各自增彩度後的 GT 建立輸入。
+
 ### 舊 T=20 Lab/RGB 模型的 DIV2K 全灰評測
 
 以官方 validation `0801.png`–`0900.png` 全部 100 張作為 input 與 reference，

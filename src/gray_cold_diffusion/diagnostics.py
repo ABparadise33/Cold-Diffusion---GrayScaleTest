@@ -37,7 +37,9 @@ def sample_from_step(
     return x, trajectory
 
 
-def check_diagnostic_checkpoint(config: dict, baseline: dict, step: int, expected_step: int):
+def check_diagnostic_checkpoint(
+    config: dict, baseline: dict, step: int, expected_step: int, *, color_space: str = "lab",
+):
     """Refuse a different experiment, representation, recipe, or checkpoint age."""
     mismatches = []
     for key in ("experiment", "mode", "seed", "model", "diffusion"):
@@ -61,7 +63,13 @@ def check_diagnostic_checkpoint(config: dict, baseline: dict, step: int, expecte
         mismatches.append("training.effective_batch_size")
     if step != expected_step:
         mismatches.append(f"checkpoint_step={step}, expected={expected_step}")
-    if config.get("mode") not in {"cold_gray", "natural_lab_colorization"}:
-        mismatches.append("requires a Lab model (cold_gray or natural_lab_colorization)")
+    allowed_modes = {
+        "lab": {"cold_gray", "natural_lab_colorization"},
+        "rgb": {"natural_rgb_colorization"},
+    }
+    if color_space not in allowed_modes:
+        raise ValueError("color_space must be lab or rgb")
+    if config.get("mode") not in allowed_modes[color_space]:
+        mismatches.append(f"requires a {color_space.upper()} model")
     if mismatches:
-        raise ValueError("checkpoint does not match the selected DIV2K Lab control: " + "; ".join(mismatches))
+        raise ValueError(f"checkpoint does not match the selected DIV2K {color_space.upper()} control: " + "; ".join(mismatches))
