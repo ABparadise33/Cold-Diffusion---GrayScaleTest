@@ -1,5 +1,6 @@
 """Isolated memory-fit probes. No learned weights or real checkpoints are saved."""
 import argparse
+from collections import deque
 import copy
 import json
 from pathlib import Path
@@ -17,6 +18,33 @@ from .metrics import delta_e76, psnr, ssim, trajectory_monotonic_fraction
 
 OOM_EXIT = 42
 RESULT_MARKER = 'BATCH_PROBE_RESULT='
+
+
+def initialize_probe_cuda(device):
+    """Resolve bare 'cuda' to the current logical index before set_device.
+
+    Logical indices respect CUDA_VISIBLE_DEVICES; do not assume physical GPU0.
+    Keep every subsequent allocation and memory query on this resolved device.
+    """
+    device = torch.device(device)
+    if device.type != 'cuda':
+        raise ValueError('CUDA initialization requires a CUDA device')
+    if device.index is None:
+        device = torch.device('cuda', torch.cuda.current_device())
+    torch.cuda.set_device(device.index)
+    torch.cuda.init()
+    initial_free, total = torch.cuda.mem_get_info(device)
+    torch.cuda.reset_peak_memory_stats(device)
+    return device, initial_free, total
+
+
+def show_worker_error(log_path):
+    """Surface a bounded traceback tail, while preserving the full worker log."""
+    print(f'Worker error details: {log_path}', file=sys.stderr, flush=True)
+    if log_path.is_file():
+        with log_path.open(errors='replace') as handle:
+            tail = ''.join(deque(handle, maxlen=80))[-16000:]
+        print(tail, file=sys.stderr, end='' if tail.endswith('\n') else '\n', flush=True)
 
 
 def candidate_batches(effective_batch):
@@ -47,11 +75,20 @@ def run_child(config_path, batch_size, effective_batch, attempt_dir, timeout=300
     command = [sys.executable, '-u', '-m', 'gray_cold_diffusion.batch_probe',
                '--config', str(config_path), '--batch-size', str(batch_size),
                '--effective-batch', str(effective_batch), '--result', str(result_path)]
-    with (attempt_dir / 'worker.log').open('w') as log:
-        # subprocess.run kills and waits for this worker on timeout. An OOM
-        # process also exits completely before another CUDA context is started.
-        completed = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
-    result = json.loads(result_path.read_text()) if result_path.exists() else {}
+    log_path = attempt_dir / 'worker.log'
+    try:
+        with log_path.open('w') as log:
+            # subprocess.run kills and waits for this worker on timeout. An OOM
+            # process also exits completely before another CUDA context is started.
+            completed = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+        result = json.loads(result_path.read_text()) if result_path.exists() else {}
+    except (Exception, KeyboardInterrupt):
+        show_worker_error(log_path)
+        raise
+    if completed.returncode != 0 and not (
+        completed.returncode == OOM_EXIT and result.get('status') == 'cuda_oom'
+    ):
+        show_worker_error(log_path)
     return completed.returncode, result
 
 
@@ -104,10 +141,7 @@ def probe_workload(config, batch_size, effective_batch, device, updates=3):
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
     if device.type == 'cuda':
-        torch.cuda.set_device(device)
-        torch.cuda.init()
-        initial_free, total = torch.cuda.mem_get_info(device)
-        torch.cuda.reset_peak_memory_stats(device)
+        device, initial_free, total = initialize_probe_cuda(device)
     else:
         initial_free = total = 0
     model, bridge = build_model_and_bridge(config)
@@ -187,6 +221,11 @@ def main():
         Path(args.result).write_text(json.dumps(result, indent=2))
         print(RESULT_MARKER + json.dumps(result), flush=True)
         return OOM_EXIT
+    except Exception as exc:
+        result = {'status': 'error', 'error_type': type(exc).__name__,
+                  'error': str(exc), 'batch_size': args.batch_size}
+        Path(args.result).write_text(json.dumps(result, indent=2))
+        raise  # never misclassify an initialization/shape/etc. error as OOM
     Path(args.result).write_text(json.dumps(result, indent=2))
     print(RESULT_MARKER + json.dumps(result), flush=True)
     return 0

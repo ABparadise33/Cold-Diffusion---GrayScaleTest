@@ -82,6 +82,11 @@ bash scripts/train_official_div2k_4090.sh --auto-batch --resume --max-steps 1000
 這仍只是續訓指令範例，不自動增加訓練預算。`--auto-batch` 不能與手動
 `OFFICIAL_BATCH_SIZE`／`OFFICIAL_GRAD_ACCUM` 或 `--batch-size`／`--grad-accum` 混用。
 
+如果舊版本出現 `set_device ... specified index ... got:cuda`，這是探測程序的
+裝置編號bug，不是顯存不足。更新後直接重跑 `--auto-batch`，不需重裝環境；
+若正式訓練尚未開始，也不需 `--resume`。新版本遇到子程序錯誤會直接顯示原始
+traceback，完整紀錄仍保留在對應 `worker.log`。
+
 4090 完整 batch 的 VRAM／時間尚待 instance 實測；不要用 CPU smoke 推估。
 進度列會顯示 step/s、ETA 與 peak allocated VRAM；驗證也有額外耗時。
 

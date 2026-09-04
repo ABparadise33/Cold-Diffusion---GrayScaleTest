@@ -2,6 +2,14 @@
 
 Record real experiments here. Do not treat smoke tests as scientific evidence.
 
+## 2026-09-04 — Fix real4090 probe initialization and hidden worker traceback
+
+- Observed on user's instance: torch2.5.1+cu121, RTX4090 23.5GiB, DIV2K800/100 checks pass; first batch32 probe fails at `torch.cuda.set_device(torch.device('cuda'))` before any memory-fit experiment. Source log: `outputs/batch_probes/official_20260904T132125Z_jg0ihvpc/batch_32/worker.log`. This is an implementation error, not an observed OOM or batch-capacity limit. Formal training had not started.
+- Fix: normalize a bare CUDA device with torch.cuda.current_device(), retain explicit indices, pass the resolved integer to set_device, and use its indexed torch.device for later memory queries/allocations. Logical-index semantics preserve CUDA_VISIBLE_DEVICES. No changes to official model, operator, training configuration or checkpoint fingerprints.
+- Error visibility: worker non-OOM exceptions now record error type/message and re-raise; parent prints a bounded80-line/16KB original log tail for failures and timeouts. OOM fallback remains restricted to its typed exception/exit42 protocol; unrelated errors still stop the search.
+- Targeted checks:15 tests passed, one real-CUDA integration test skipped on this local CPU host. Full suite:109 passed,1 CUDA-only test skipped in24.83s; Ruff and diff checks passed. New regression uses the real torch._utils device-index argument validator with mocked runtime calls for barecuda→0, barecuda→current2, and explicitcuda:1. Added original-traceback/timeout visibility tests and error-result persistence checks. This covers the actual missed argument contract but does not claim a successful real4090 workload locally.
+- Rerun after git pull: `bash scripts/train_official_div2k_4090.sh --auto-batch`. No reinstall or --resume is required for this pre-training failure; preserve the failed probe log. A successful device initialization is not yet evidence that batch32 fits; the candidate search must run on the user's GPU.
+
 ## 2026-09-04 — Optional isolated CUDA batch-fit search before official training
 
 - User asks to try batch size near the limit and continue with smaller batches after an OOM. Added `bash scripts/train_official_div2k_4090.sh --auto-batch`; default/manual launch remains available. This is resource configuration within the saturation1 baseline, not new training data, model, learning rate, total steps or an automatic restart policy for a live run.

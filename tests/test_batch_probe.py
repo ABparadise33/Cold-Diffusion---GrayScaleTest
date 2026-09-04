@@ -14,6 +14,27 @@ ROOT = Path(__file__).resolve().parents[1]
 GIB = 1024**3
 
 
+@pytest.mark.parametrize('requested,current,expected', [('cuda', 0, 0), ('cuda', 2, 2), ('cuda:1', 0, 1)])
+def test_cuda_setup_resolves_index_before_set_device(monkeypatch, requested, current, expected):
+    calls = []
+    monkeypatch.setattr(torch.cuda, 'current_device', lambda: current)
+
+    def strict_set_device(device):
+        # Exercise the real PyTorch argument validation, without a CUDA runtime.
+        # The old set_device(torch.device('cuda')) fails this exact check.
+        from torch._utils import _get_device_index
+        calls.append(('set', _get_device_index(device, optional=False)))
+
+    monkeypatch.setattr(torch.cuda, 'set_device', strict_set_device)
+    monkeypatch.setattr(torch.cuda, 'init', lambda: calls.append(('init',)))
+    monkeypatch.setattr(torch.cuda, 'mem_get_info', lambda d: calls.append(('mem', d)) or (23 * GIB, 24 * GIB))
+    monkeypatch.setattr(torch.cuda, 'reset_peak_memory_stats', lambda d: calls.append(('reset', d)))
+    device, free, total = batch_probe.initialize_probe_cuda(requested)
+    assert device == torch.device('cuda', expected)
+    assert (free, total) == (23 * GIB, 24 * GIB)
+    assert calls == [('set', expected), ('init',), ('mem', device), ('reset', device)]
+
+
 def good_result(peak=12):
     return {'status': 'ok', 'total_bytes': 24 * GIB, 'initial_free_bytes': 23 * GIB,
             'peak_reserved_bytes': peak * GIB, 'final_free_bytes': (23 - peak) * GIB}
@@ -109,6 +130,41 @@ def test_child_protocol_uses_a_separate_process_and_log(tmp_path, monkeypatch):
     assert 'fixture' in (tmp_path / 'attempt/worker.log').read_text()
 
 
+def test_child_failure_prints_original_traceback_without_result_json(tmp_path, monkeypatch, capsys):
+    def fake_run(command, stdout, stderr, timeout):
+        stdout.write('Traceback (most recent call last):\nValueError: specified index required, got cuda\n')
+        return subprocess.CompletedProcess(command, 1)
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    code, result = batch_probe.run_child('config.yaml', 32, 32, tmp_path / 'failed')
+    assert code == 1 and result == {}
+    output = capsys.readouterr().err
+    assert 'worker.log' in output and 'ValueError: specified index required' in output
+
+
+def test_child_timeout_prints_log_and_remains_fatal(tmp_path, monkeypatch, capsys):
+    def fake_run(command, stdout, stderr, timeout):
+        stdout.write('last worker message before timeout\n')
+        raise subprocess.TimeoutExpired(command, timeout)
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    with pytest.raises(subprocess.TimeoutExpired):
+        batch_probe.run_child('config.yaml', 32, 32, tmp_path / 'timeout')
+    assert 'last worker message before timeout' in capsys.readouterr().err
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='real CUDA probe requires a GPU')
+def test_real_cuda_probe_accepts_bare_cuda():
+    config = yaml.safe_load((ROOT / 'configs/div2k_official_rgb_sat1_50k.yaml').read_text())
+    config['model'].update(dim=8, dim_mults=[1, 2])
+    config['data']['image_size'] = 16
+    config['diffusion']['steps'] = 2
+    result = batch_probe.probe_workload(config, 1, 1, 'cuda', updates=2)
+    assert result['status'] == 'ok'
+    assert result['device'] == f'cuda:{torch.cuda.current_device()}'
+    assert result['peak_reserved_bytes'] > 0
+
+
 def test_worker_typed_cuda_oom_only(monkeypatch, tmp_path):
     cfg = tmp_path / 'config.yaml'
     cfg.write_text('{}')
@@ -130,6 +186,8 @@ def test_worker_typed_cuda_oom_only(monkeypatch, tmp_path):
     monkeypatch.setattr(batch_probe, 'probe_workload', bug)
     with pytest.raises(RuntimeError, match='shape bug'):
         batch_probe.main()
+    assert json.loads(output.read_text())['status'] == 'error'
+    assert json.loads(output.read_text())['error_type'] == 'RuntimeError'
 
 
 def test_auto_script_routes_correctly_and_rejects_manual_conflict():
