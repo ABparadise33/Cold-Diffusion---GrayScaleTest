@@ -193,11 +193,13 @@ def test_fresh_training_resume_full_scene_and_both_evaluations(tmp_path):
                  '--reference-dir', str(val_dir), '--split-file', str(split), '--device', 'cpu',
                  '--original-size', '--batch-size', '1', '--tile-size', '16', '--tile-overlap', '4',
                  '--sampler', sampler, '--output-dir', str(evaluation)], tmp_path)
-        metadata = json.loads((evaluation / 'metrics.json').read_text())['evaluation']
+        metadata = json.loads((evaluation / '其餘/metrics.json').read_text())['evaluation']
         assert metadata['sampler'] == sampler
         assert metadata['num_images'] == 2
         assert metadata['checkpoint_step'] == 2
         assert len(list((evaluation / 'predictions').glob('*.png'))) == 2
+        assert not (evaluation / 'references').exists()
+        assert (evaluation / '其餘/training_curves.png').is_file()
         with Image.open(evaluation / 'predictions/0000.png') as image:
             assert image.size == (25, 17)
     # Same weights and same gray input give exactly identical Direct predictions.

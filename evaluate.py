@@ -23,7 +23,7 @@ from gray_cold_diffusion.extended_metrics import (
     evaluate_extended_metrics,
     save_method_comparison,
 )
-from gray_cold_diffusion.io import save_stage_strip, save_tensor_image, save_trajectory_grid, select_device
+from gray_cold_diffusion.io import _tensor_to_pil, save_stage_strip, save_tensor_image, save_trajectory_grid, select_device
 from gray_cold_diffusion.metrics import delta_e76, psnr, ssim, trajectory_monotonic_fraction
 from gray_cold_diffusion.factory import (
     ITERATIVE_MODES, NATURAL_MODES, OFFICIAL_MODE, RGB_MODES, build_model_and_bridge,
@@ -42,6 +42,8 @@ def main():
     parser.add_argument("--split-file", required=True)
     parser.add_argument("--split", default="test", choices=["train", "val", "test"])
     parser.add_argument("--output-dir", default="evaluation")
+    parser.add_argument("--output-layout", choices=["auto", "compact", "legacy"], default="auto",
+                        help="auto: official mode uses compact (no reference copies; reports in 其餘)")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=4)
     spatial_group = parser.add_mutually_exclusive_group()
@@ -78,6 +80,9 @@ def main():
     checkpoint_path = Path(args.checkpoint)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     config = checkpoint["config"]
+    compact = args.output_layout == "compact" or (
+        args.output_layout == "auto" and config["mode"] == OFFICIAL_MODE
+    )
     steps = int(config["diffusion"]["steps"])
     if args.sampler:
         if config["mode"] != OFFICIAL_MODE:
@@ -123,6 +128,8 @@ def main():
     if config["mode"] == OFFICIAL_MODE and output.exists() and any(output.iterdir()):
         raise FileExistsError(f"official evaluation output already exists: {output}; choose a new directory")
     output.mkdir(parents=True, exist_ok=True)
+    report_dir = output / "其餘" if compact else output
+    report_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = (
         Path(args.training_metrics)
         if args.training_metrics
@@ -130,8 +137,8 @@ def main():
     )
     training_summary = None
     if metrics_path.is_file():
-        training_summary = save_training_report(metrics_path, output)
-        print(f"training_curves={output / 'training_curves.png'}")
+        training_summary = save_training_report(metrics_path, report_dir)
+        print(f"training_curves={report_dir / 'training_curves.png'}")
         print(f"resume_hint={training_summary['resume_hint']}")
     else:
         print(f"warning: training metrics not found: {metrics_path}")
@@ -145,6 +152,18 @@ def main():
     prediction_dir = output / "predictions"
     direct_prediction_dir = output / "direct_predictions"
     evaluation_reference_dir = output / "references"
+    reference_loader = None
+    if compact and args.extended_metrics:
+        # Use precisely the same aligned/center-cropped reference tensor and
+        # 8-bit rounding as the former PNG export, without writing duplicate GT.
+        index_by_name = {
+            dataset._paths(item)[0].stem: index for index, item in enumerate(dataset.items)
+        }
+        if len(index_by_name) != len(dataset):
+            raise ValueError("duplicate prediction stems in evaluation split")
+
+        def reference_loader(name):
+            return _tensor_to_pil(dataset[index_by_name[name]]["reference"])
     with torch.no_grad():
         for batch in loader:
             raw = batch["raw"].to(device)
@@ -203,10 +222,11 @@ def main():
                 direct_totals["ssim"] += batch_direct_ssim.sum().item()
                 direct_totals["delta_e76"] += batch_direct_delta_e.sum().item()
             count += raw.shape[0]
-            if args.extended_metrics or mode == OFFICIAL_MODE:
+            if args.extended_metrics or mode == OFFICIAL_MODE or compact:
                 for image_index, name in enumerate(batch["name"]):
                     save_tensor_image(pred[image_index], prediction_dir / f"{name}.png")
-                    save_tensor_image(reference[image_index], evaluation_reference_dir / f"{name}.png")
+                    if not compact:
+                        save_tensor_image(reference[image_index], evaluation_reference_dir / f"{name}.png")
                     if direct is not None:
                         save_tensor_image(direct[image_index], direct_prediction_dir / f"{name}.png")
                     exported_names.append(name)
@@ -261,6 +281,10 @@ def main():
         "tile_overlap": args.tile_overlap if args.tile_size is not None else None,
         "split_file": str(split_path.resolve()),
         "split_sha256": hashlib.sha256(split_path.read_bytes()).hexdigest(),
+        "output_layout": "compact" if compact else "legacy",
+        "reference_exports": bool(exported_names) and not compact,
+        "raw_dir": str(Path(args.raw_dir).resolve()),
+        "reference_dir": str(Path(args.reference_dir).resolve()),
     }
     if mode in NATURAL_MODES:
         metrics["evaluation"]["training_saturation_factor"] = float(
@@ -279,7 +303,7 @@ def main():
             "checkpoint_implementation": config.get("implementation"),
         })
     # Persist core evidence before optional metric models/downloads can fail.
-    (output / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    (report_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 
     if args.extended_metrics:
         del inference_model, model, bridge
@@ -290,33 +314,35 @@ def main():
             prediction_dir=prediction_dir,
             reference_dir=evaluation_reference_dir,
             names=exported_names,
-            output_csv=output / "extended_metrics.csv",
+            output_csv=report_dir / "extended_metrics.csv",
             device=device,
             eval_size=args.extended_metric_size,
             cold_scores=cold_scores,
             pyiqa_metrics=pyiqa_metrics,
             progress_label="algorithm2_metrics",
+            reference_loader=reference_loader,
         )
         if direct_totals is not None:
             metrics["direct_extended"] = evaluate_extended_metrics(
                 prediction_dir=direct_prediction_dir,
                 reference_dir=evaluation_reference_dir,
                 names=exported_names,
-                output_csv=output / "direct_metrics.csv",
+                output_csv=report_dir / "direct_metrics.csv",
                 device=device,
                 eval_size=args.extended_metric_size,
                 cold_scores=direct_scores,
                 pyiqa_metrics=pyiqa_metrics,
                 progress_label="direct_metrics",
+                reference_loader=reference_loader,
             )
             comparison = save_method_comparison(
                 metrics["direct_extended"]["means"],
                 metrics["extended"]["means"],
-                output / "direct_vs_algorithm2.csv",
+                report_dir / "direct_vs_algorithm2.csv",
             )
             metrics["direct_vs_algorithm2"] = comparison
         metrics["evaluation"]["extended_metric_size"] = args.extended_metric_size
-    (output / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    (report_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2))
 
 

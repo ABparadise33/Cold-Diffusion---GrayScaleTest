@@ -1,7 +1,8 @@
 # DIV2K：官方 RGB colorization 全灰階 baseline，飽和度 1
 
 這是新的 baseline，**不會改掉或覆蓋舊 UIEB／Lab／RGB 實驗**。
-先在 DIV2K 看能不能從全灰階恢復多種色彩，不先做水下推論或飽和度 sweep。
+在 DIV2K 訓練後，使用同一份權重推論 UIEB Test90，檢查自然影像學到的色彩能否
+轉移到水下影像；DIV2K 驗證保留作為域內對照。這輪仍只做飽和度 1。
 
 ## 在現有 instance 執行
 
@@ -134,23 +135,67 @@ bash scripts/train_official_div2k_4090.sh --resume --max-steps 100000
 續訓保留模型／optimizer／EMA／RNG；DataLoader重新建立，因此 crop／洗牌順序
 不保證與不中斷訓練逐位元相同。模式、模型、原始碼指紋、資料清單與有效batch有檢查。
 
-## 訓練完成後：固定50k的兩種反推對照
+## 訓練完成後：UIEB Test90，固定50k的兩種反推對照
 
 ```bash
-bash scripts/evaluate_official_div2k_4090.sh
+bash scripts/evaluate_official_uieb_4090.sh
 ```
 
-它使用同一個 `step_050000.pt`，對 DIV2K Val100 全灰階原尺寸推論兩次：
+它使用 DIV2K 訓練的同一個 `step_050000.pt`，對 UIEB 水下 Test90 全灰階原尺寸
+推論兩次。切分仍是 `splits/uieb_seed42.json`，與先前 FlowIE 的測試圖片一致。
+輸入由 `data/UIEB/raw-890/` 轉為 RGB 三通道平均灰階；
+`data/UIEB/reference-890/` **只用於評分及對照圖，不作模型輸入**。
 
 - `paper_algorithm2`：論文公式，20次更新；主要 baseline。
 - `official_code`：保留固定版本原始碼的時間索引，20次模型呼叫但19次有效更新。
 
 兩者的 Direct 使用相同權重與全灰階輸入。**它們不是兩次訓練**，也不是
 `gray_oneshot`。不因為都叫Algorithm2就把索引差異藏起來。
-結果在 `evaluation/div2k_official_rgb_sat1.00x_step050000/<sampler>/`。
-原圖尺寸預測全部輸出，即使不跑額外IQA；batch／trajectory 各自一個資料夾。
+結果在 `evaluation/div2k_official_rgb_sat1.00x_uieb_test90_step050000/<sampler>/`：
+
+```text
+<sampler>/
+  predictions/                  # 90張，反推最終輸出，原始寬高
+  direct_predictions/           # 90張，同一權重的Direct，暫時保留
+  batches/                      # 對照圖，包含GT；預設4張預覽
+  trajectories/                 # 左→右軌跡；預設4張預覽
+  其餘/
+    metrics.json
+    training_curves.png
+    training_summary.json
+```
+
+曲線及訓練摘要需要 checkpoint 所屬訓練資料夾中的 `metrics.csv`；找不到時會警告，
+不捏造曲線。可用 `--training-metrics` 指定檔案。`references/` 不另存，原始 GT
+仍留在資料集。預設獨立 PNG 不縮放，對照圖／軌跡顯示縮圖最長邊 512；
+需要 90 張對照圖及軌跡可在腳本後加 `--preview-count 90`。
+
 需要舊14項指標時在指令後加 `--extended-metrics`，可能下載其評分模型。
 第一次可先用預設，避免評分模型下載阻擋看圖；核心分數會先存下來。
+額外產生的 `extended_metrics`、`direct_metrics`、`direct_vs_algorithm2` 的 CSV／MD
+也放在 `其餘/`。額外評分直接重新載入相同前處理的 GT，再做與舊 PNG 匯出相同的
+8-bit 量化，不需要重新輸出 references。
+
+已完成的舊格式 UIEB 結果可整理，**不用重新推論**：
+
+```bash
+.venv/bin/python tools/organize_official_evaluation.py \
+  --output-dir evaluation/div2k_official_rgb_sat1.00x_uieb_test90_step050000 \
+  --apply
+```
+
+也可以指向單一 sampler 子資料夾。省略 `--apply` 只預覽。工具先檢查完整預測數量，
+只搬已知報表、不覆蓋既有檔案；只移除與預測同名的 reference 副本，遇到不明檔案或
+符號連結會停止。預測、Direct、batch、trajectory 檔案不變；reference 副本可由原始
+UIEB 資料重建，資料集本身不會被修改。舊報表內容保留為當次推論紀錄，不重算分數。
+
+新的 official 評測預設採這個精簡結構（`--output-layout auto`）；舊 Lab／小 U-Net
+模式的預設輸出不變。明確指定 `--output-layout legacy` 可保留舊格式。
+
+DIV2K Val100 域內對照仍可單獨執行 `bash scripts/evaluate_official_div2k_4090.sh`，
+輸出在 `evaluation/div2k_official_rgb_sat1.00x_step050000/<sampler>/`，不要與 UIEB
+的分數混為同一測試集。既有非空 official 輸出目錄不會覆蓋；需重推論時可設定
+`OFFICIAL_EVAL_OUTPUT` 使用新資料夾。
 
 ## 上游程式來源與移植範圍
 

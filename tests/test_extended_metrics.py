@@ -57,6 +57,17 @@ def test_extended_metrics_writes_per_image_and_mean(monkeypatch, tmp_path):
     assert result["means"]["trajectory_monotonic"] == 0.875
     assert output_csv.with_suffix(".md").is_file()
 
+    # Compact export reloads the exact reference image without a saved-GT directory.
+    loaded_references = {name: Image.open(reference_dir / f"{name}.png").copy() for name in names}
+    compact_csv = tmp_path / "其餘/extended_metrics.csv"
+    compact_result = extended_metrics.evaluate_extended_metrics(
+        prediction_dir, tmp_path / "nonexistent_references", names, compact_csv,
+        torch.device("cpu"), eval_size=32, cold_scores=cold_scores,
+        pyiqa_metrics=dummy_metrics, reference_loader=loaded_references.__getitem__,
+    )
+    assert compact_result == result
+    assert compact_csv.read_bytes() == output_csv.read_bytes()
+
     direct_csv = tmp_path / "direct_metrics.csv"
     direct_result = extended_metrics.evaluate_extended_metrics(
         prediction_dir,

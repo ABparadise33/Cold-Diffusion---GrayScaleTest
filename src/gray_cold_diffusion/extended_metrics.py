@@ -201,6 +201,11 @@ def create_pyiqa_metrics(device):
 def _image_to_tensor_and_array(path: Path, eval_size: int, device):
     with Image.open(path) as source:
         image = source.convert("RGB")
+    return _pil_to_tensor_and_array(image, eval_size, device)
+
+
+def _pil_to_tensor_and_array(image: Image.Image, eval_size: int, device):
+    image = image.convert("RGB")
     if eval_size:
         image = image.resize((eval_size, eval_size), Image.Resampling.LANCZOS)
     array = np.asarray(image)
@@ -227,6 +232,7 @@ def evaluate_extended_metrics(
     cold_scores: dict[str, dict[str, float]] | None = None,
     pyiqa_metrics=None,
     progress_label: str = "extended_metrics",
+    reference_loader=None,
 ):
     prediction_dir = Path(prediction_dir)
     reference_dir = Path(reference_dir)
@@ -241,9 +247,14 @@ def evaluate_extended_metrics(
         prediction, prediction_array = _image_to_tensor_and_array(
             prediction_dir / f"{name}.png", eval_size, device
         )
-        reference, reference_array = _image_to_tensor_and_array(
-            reference_dir / f"{name}.png", eval_size, device
-        )
+        if reference_loader is None:
+            reference, reference_array = _image_to_tensor_and_array(
+                reference_dir / f"{name}.png", eval_size, device
+            )
+        else:
+            reference, reference_array = _pil_to_tensor_and_array(
+                reference_loader(name), eval_size, device
+            )
         row = {"image": name}
         with torch.no_grad():
             for metric_name in ("niqe", "musiq", "clipiqa"):

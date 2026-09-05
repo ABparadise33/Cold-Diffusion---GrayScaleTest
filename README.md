@@ -28,6 +28,27 @@ bash scripts/train_official_div2k_4090.sh --auto-batch
 **先不要跑下方舊版飽和度sweep。** 完整設定、來源、論文／官方索引差異、續訓與評測：
 [官方 baseline 說明](docs/official_colorization.md)。這是DIV2K50k適配，不是CIFAR/CelebA700k復現。
 
+### 訓練完成：用 UIEB Test90 推論
+
+使用 DIV2K 訓練的 `step_050000.pt`，不在 UIEB 重新訓練：
+
+```bash
+bash scripts/evaluate_official_uieb_4090.sh
+```
+
+沿用 `splits/uieb_seed42.json` 的 90 張水下影像，分別輸出兩種 sampler 的結果。
+每組保留 `predictions/`、`direct_predictions/`、`batches/`、`trajectories/`；
+三份報表放入 `其餘/`，不另存 `references/`。GT 仍用於評分與對照圖。
+預測 PNG 保持原圖寬高；預設 batch／trajectory 預覽各 4 張。
+
+已跑完的結果不用重推論，可直接整理（只移除輸出的 reference 副本，不動資料集）：
+
+```bash
+.venv/bin/python tools/organize_official_evaluation.py \
+  --output-dir evaluation/div2k_official_rgb_sat1.00x_uieb_test90_step050000 \
+  --apply
+```
+
 ## 以下保留舊實驗說明
 
 50k-step 小型實驗，驗證：
