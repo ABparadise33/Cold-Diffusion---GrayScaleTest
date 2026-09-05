@@ -7,7 +7,7 @@ data:
   image_size: 128
   num_workers: 4
   saturation_factor: 1.0
-  validation_preview_name: '0803'
+  validation_preview_name: '0803'  # Legacy provenance only; official previews now sample validation images.
 
 model:
   architecture: upstream_convnext
@@ -33,6 +33,7 @@ training:
   save_every: 1000
   checkpoint_milestone_every: 50000
   min_free_disk_gb: 5
+  preview_count: 5  # At each validation (every 1000 updates, plus the final step).
   preview_tile_size: 256
   preview_tile_overlap: 32
   preview_max_side: 512

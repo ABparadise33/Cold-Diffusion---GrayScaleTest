@@ -36,7 +36,7 @@ bash scripts/train_official_div2k_4090.sh
 | batch | 4 × 累積 8 = 有效 32；128px crop |
 | EMA | .995、每 10 次更新；沿用官方 2k warmup 與零起算計數時機 |
 | 種子 | 42 |
-| 驗證 | 每 1k，全 100 張固定 128px center crops；另外存固定 0803 完整照片 |
+| 驗證 | 每 1k，全 100 張固定 128px center crops；另外隨機抽 5 張完整照片存預覽 |
 
 這是**官方模型／RGB 退化＋論文反推的 DIV2K 50k 適配版**，不是論文的完整
 CIFAR-10／CelebA 700k 復現。仍有 DIV2K、128px random crops/flip、較少訓練、
@@ -99,12 +99,14 @@ outputs/div2k_official_rgb_sat1.00x_50k/
   metrics.csv                      # training L1、驗證 PSNR/SSIM/Delta-E
   training_curves.png               # 每次存檔刷新
   full_gray_metrics.csv             # Direct/Algorithm2/gray色差、chroma、完整驗證L1
-  samples/
-    step_001000.png                 # 固定0803完整場景比較圖
-    preview.json                    # 圖片、原始尺寸、tile與顯示設定
-    predictions/step_001000.png     # 原始寬高的Algorithm2預測
-    direct_predictions/step_001000.png
-  trajectories/step_001000.png      # 左→右，與sample分開
+  previews/
+    step_001000/                   # 這次隨機抽到的5張完整驗證圖片
+      samples/                     # 5張對照圖，以原圖檔名命名
+      trajectories/                # 同5張的左→右軌跡
+      predictions/                 # 同5張的原始寬高Algorithm2輸出
+      direct_predictions/          # 同5張的原始寬高Direct輸出
+      preview.json                 # 抽樣種子、檔名、原始尺寸、完成狀態
+    step_002000/                   # 重新抽5張；後續每1k同樣建立資料夾
   checkpoints/
     latest.pt                      # 最近一次；可續訓
     best.pt                        # 全灰階驗證Delta-E最低，未必50k
@@ -114,9 +116,21 @@ outputs/div2k_official_rgb_sat1.00x_50k/
 完整照片以 256px tile／32px overlap 推論；這會改變 attention 可見範圍，是明確的
 full-resolution 適配，不宣稱等於整張一次進模型。非8倍數邊界只補齊再裁回，不 resize。
 獨立 prediction PNG 保持原尺寸。對照圖／trajectory 的**顯示縮圖**限制最長邊512，
-不改獨立預測；要看細節請開 `samples/predictions/`。
+不改獨立預測；要看細節請開 `previews/step_001000/predictions/` 等資料夾。
 
-不要只看 PSNR。至少一起看固定場景的色彩、`delta_e76`、`direct_delta_e76`、
+預覽沿用驗證頻率 `training.validate_every: 1000`，最終停止的 step 也會保存一次。
+`training.preview_count: 5`：每次從 validation 100 張中無放回抽5張；跨step可重複。
+抽樣使用獨立的 seed+step 亂數，不消耗訓練的洗牌／crop 亂數。同一seed、step、
+圖片清單可重現相同選圖；不足5張的小型 smoke set 則全部輸出。
+舊 `data.validation_preview_name` 僅保留歷史設定相容性，official 模式不再固定選0803。
+完整驗證仍是100張；不能把每次不同的5張預覽當成固定樣本的收斂比較。
+逐張推論避免同時將5張大圖放上GPU，但預覽耗時與存圖空間會增加。
+舊 `samples/`、`trajectories/` 不搬動、不刪除；新紀錄使用 `previews/`。
+若中斷後重新走到同一步，已有預覽會保留，新的一次放在該step底下的 `retry_001/`
+（依序編號），不會因存圖尚未完成就卡住續訓，也不會覆蓋前次證據。
+更新程式不會改變已在執行的訓練程序，也不會替已完成的steps補出另外4張。
+
+不要只看 PSNR。至少一起看場景的色彩、`delta_e76`、`direct_delta_e76`、
 `gray_delta_e76`、`chroma_ratio`（預測／目標平均彩度）。彩度接近1本身不代表色相正確。
 `direct_val_l1` 是全灰階模型輸出的L1，`val_l1` 是反推最終L1；訓練L1混合不同t，
 與兩者的難度不同。5k／10k先看趨勢，50k後再決定是否續訓。
@@ -134,6 +148,8 @@ bash scripts/train_official_div2k_4090.sh --resume --max-steps 100000
 覆蓋非空輸出。舊 UIEB／小 U-Net checkpoint 不相容，也不會自動載入。
 續訓保留模型／optimizer／EMA／RNG；DataLoader重新建立，因此 crop／洗牌順序
 不保證與不中斷訓練逐位元相同。模式、模型、原始碼指紋、資料清單與有效batch有檢查。
+本次只有預覽的已知版本更新允許接續上一版 official checkpoint，並在 manifest
+記錄舊指紋與原因；其他模型／訓練原始碼或資料差異仍拒絕。不會把舊模型放寬成可續訓。
 
 ## 訓練完成後：UIEB Test90，固定50k的兩種反推對照
 

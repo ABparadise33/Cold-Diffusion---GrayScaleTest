@@ -180,11 +180,30 @@ def test_fresh_training_resume_full_scene_and_both_evaluations(tmp_path):
     assert payload['run_metadata']['data']['val']['count'] == 2
     assert (output / 'training_curves.png').is_file()
     assert (output / 'full_gray_metrics.csv').is_file()
-    with Image.open(output / 'samples/predictions/step_000002.png') as image:
+    previews = output / 'previews/step_000002'
+    assert json.loads((previews / 'preview.json').read_text())['actual_count'] == 2
+    with Image.open(previews / 'predictions/0000.png') as image:
         assert image.size == (25, 17)
     run_cli(command, tmp_path, ok=False)  # never silently overwrite a run
     run_cli([*command, '--resume', '--max-steps', '3'], tmp_path)
     assert torch.load(output / 'checkpoints/latest.pt', weights_only=False)['step'] == 3
+    assert (output / 'previews/step_000003/preview.json').is_file()
+    # Simulate the exact reviewed source fingerprint of the pre-preview release.
+    legacy_payload = copy.deepcopy(payload)
+    old_hashes = legacy_payload['config']['implementation']['source_sha256']
+    old_hashes['official_training.py'] = '789c81f26dfa83f4c739c4d2f12adb87b1769a0af593ac98983af4d6cf9c7b3c'
+    del old_hashes['official_preview.py']
+    legacy_payload['config']['training'].pop('preview_count', None)
+    legacy_checkpoint = tmp_path / 'legacy.pt'
+    torch.save(legacy_payload, legacy_checkpoint)
+    migrated_output = tmp_path / 'migrated'
+    migrated = run_cli([*command, '--resume', str(legacy_checkpoint), '--max-steps', '3',
+                        '--output-dir', str(migrated_output)], tmp_path)
+    assert 'verified known preview-only revision' in migrated.stdout
+    assert (migrated_output / 'previews/step_000003/preview.json').is_file()
+    resumed = torch.load(migrated_output / 'checkpoints/latest.pt', weights_only=False)
+    assert resumed['step'] == 3
+    assert 'preview_only_resume_migration' in resumed['run_metadata']
     split = tmp_path / 'split.json'
     split.write_text(json.dumps({'test': ['0000.png', '0001.png']}))
     for sampler in ('paper_algorithm2', 'official_code'):

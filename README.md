@@ -24,7 +24,10 @@ bash scripts/train_official_div2k_4090.sh --auto-batch
 測32→16→8→4→2→1，保留顯存餘裕、有效batch固定32。測試與正式訓練分開；
 非OOM錯誤不會被忽略。**上述兩個訓練指令擇一，不要同時跑。**
 
-輸出：`outputs/div2k_official_rgb_sat1.00x_50k/`，每1k存固定驗證照片、色彩指標與曲線。
+輸出：`outputs/div2k_official_rgb_sat1.00x_50k/`，每1k存驗證指標與曲線，並從 DIV2K
+validation 隨機抽5張完整照片，放入 `previews/step_001000/`、`step_002000/`…。
+每個 step 資料夾內有 `samples/`、`trajectories/`、原尺寸 `predictions/` 與
+`direct_predictions/`；`preview.json` 記錄抽到的圖片。驗證分數仍計算全部100張。
 **先不要跑下方舊版飽和度sweep。** 完整設定、來源、論文／官方索引差異、續訓與評測：
 [官方 baseline 說明](docs/official_colorization.md)。這是DIV2K50k適配，不是CIFAR/CelebA700k復現。
 
