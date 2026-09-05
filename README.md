@@ -52,6 +52,21 @@ bash scripts/evaluate_official_uieb_4090.sh
   --apply
 ```
 
+### Official 全灰階效果差：保留原始色彩 5%／25% 的推論對照
+
+```bash
+bash scripts/evaluate_official_partial_uieb_4090.sh
+```
+
+不重新訓練；同一份 DIV2K saturation1 的固定50k EMA checkpoint，沿用 UIEB Test90，
+先跑 `paper_algorithm2` 兩組：保留5%從x19反推、保留25%從x15反推。
+色彩線索只來自 raw，不是GT，也不是在最後輸出混回原圖。
+結果在 `evaluation/official_rgb_partial_uieb_test90_step050000/paper_algorithm2/` 的
+`retain_5pct/`、`retain_25pct/`，保留精簡資料夾與原始圖片尺寸；不覆蓋已完成的全灰階結果。
+`其餘/metrics.json` 另含 raw／實際輸入基準與輸出對raw差距，逐圖資料在
+`其餘/per_image_core.json`。若只是變回raw，不能當成水下修復成功。
+需要全部90張對照／軌跡可加 `--preview-count 90`；需要14項舊IQA可加 `--extended-metrics`。
+
 ## 以下保留舊實驗說明
 
 50k-step 小型實驗，驗證：

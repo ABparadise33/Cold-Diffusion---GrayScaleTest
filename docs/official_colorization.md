@@ -213,6 +213,57 @@ DIV2K Val100 域內對照仍可單獨執行 `bash scripts/evaluate_official_div2
 的分數混為同一測試集。既有非空 official 輸出目錄不會覆蓋；需重推論時可設定
 `OFFICIAL_EVAL_OUTPUT` 使用新資料夾。
 
+## 推論消融：保留5%／25%原始色彩
+
+這是原有官方模型的**中間狀態起跑**，不是新的訓練模型，也不是把結果與raw後製混合。
+同一份 DIV2K saturation1 `step_050000.pt`，UIEB seed42 Test90，原尺寸256/32 tiles：
+
+```bash
+bash scripts/evaluate_official_partial_uieb_4090.sh
+```
+
+| 保留raw色彩 | 起點 (T=20) | paper Algorithm2 模型呼叫／更新 |
+|---|---|---|
+| 0%（既有baseline） | x20，全灰階 | 20 |
+| 5% | x19 | 19 |
+| 25% | x15 | 15 |
+
+`input = r*raw + (1-r)*mean_RGB(raw)`，r是0.05或0.25。
+程式使用原本的 `D(raw,s)` 取得對應狀態，之後依序呼叫模型s、s−1…1，內部對應
+upstream label s−1…0。每一步仍將**預測自身**重新退化；沒有換成固定gray(raw)
+bridge、沒有新增內部clamp、沒有把19步重新標成20步。原先訓練／全灰階sample入口不動。
+5%包含的原始色彩仍可能足以推回raw，而raw本身的偏色也可能被保留；此實驗不保證增強。
+
+腳本只跑5%／25%，不花GPU重新計算已完成的0%基準；預設 `paper_algorithm2`。
+需要literal-code索引對照時可設 `OFFICIAL_SAMPLER=official_code`；該控制有s次呼叫、
+s−1次有效更新（5%=18、25%=14），勿混報為paper版。這是該索引規則的中間起跑延伸。
+
+```text
+evaluation/official_rgb_partial_uieb_test90_step050000/paper_algorithm2/
+  retain_5pct/
+    predictions/ / direct_predictions/ / batches/ / trajectories/
+    其餘/metrics.json
+    其餘/per_image_core.json
+    其餘/training_curves.png / training_summary.json  # 原訓練metrics.csv可用時
+  retain_25pct/                                        # 同一結構
+```
+
+所有90張獨立預測保持原始寬高，預設各4張對照／trajectory，並標出實際x19…x0或
+x15…x0。GT只作評分與對照顯示，不輸出references副本。
+`metrics.json`記錄實際checkpoint step與SHA256、split SHA、起點、retention、
+模型呼叫數與inference source SHA；腳本驗證checkpoint確為50000步。
+同時評分未處理raw、實際部分色彩輸入、Direct、最終output，並記錄output/direct
+對raw的RGB MAE（0–255尺度）；`per_image_core.json`保留每張數值，避免只看平均。
+
+控制判讀：先看相同魚／礁石區域是否恢復合理的多種色彩，再檢查最終分數有沒有超過
+raw。如果輸出接近raw但沒有超過raw，只能支持反轉人工去彩，不能聲稱學會水下修復。
+水域變藍也不能單獨證明模型具備水域語義辨識。此輪不新增區域分割模型或主張區域量化。
+
+單次自訂評測可使用 `evaluate.py --retain-color-percent 5`（不是0.05）；0表示原本
+全灰階，25表示保留25%。不在既有離散schedule上的比例會拒絕，避免默默四捨五入。
+只有official checkpoint能使用此選項。`--expected-checkpoint-step 50000`可防誤選best。
+額外IQA仍可加 `--extended-metrics`，原圖幾何不變，只有IQA內部沿用舊256評分前處理。
+
 ## 上游程式來源與移植範圍
 
 固定來源：[`arpitbansal297/Cold-Diffusion-Models`, f8b1379151ff0cccba49112cf61d439bd4dd4ad9](https://github.com/arpitbansal297/Cold-Diffusion-Models/tree/f8b1379151ff0cccba49112cf61d439bd4dd4ad9/decolor-diffusion)。

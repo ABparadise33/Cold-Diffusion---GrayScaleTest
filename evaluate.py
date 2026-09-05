@@ -30,13 +30,18 @@ from gray_cold_diffusion.factory import (
 )
 from gray_cold_diffusion.report import save_training_report
 from gray_cold_diffusion.tiling import TiledModel
+from gray_cold_diffusion.official_partial import partial_raw_input, retained_color_start_step, sample_from_step
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--expected-checkpoint-step", type=int,
+                        help="optional guard against evaluating best.pt from an unintended training step")
     parser.add_argument("--sampler", choices=["paper_algorithm2", "official_code"],
                         help="official baseline only; override sampling, never weights or training")
+    parser.add_argument("--retain-color-percent", type=float,
+                        help="official inference only: raw color retained at input, e.g. 5 or 25 (not 0.05)")
     parser.add_argument("--raw-dir", required=True)
     parser.add_argument("--reference-dir", required=True)
     parser.add_argument("--split-file", required=True)
@@ -79,11 +84,22 @@ def main():
     device = select_device(args.device)
     checkpoint_path = Path(args.checkpoint)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    if args.expected_checkpoint_step is not None and checkpoint.get('step') != args.expected_checkpoint_step:
+        parser.error(f'checkpoint step is {checkpoint.get("step")}, expected {args.expected_checkpoint_step}')
     config = checkpoint["config"]
     compact = args.output_layout == "compact" or (
         args.output_layout == "auto" and config["mode"] == OFFICIAL_MODE
     )
     steps = int(config["diffusion"]["steps"])
+    start_step = steps
+    retention_diagnostic = args.retain_color_percent is not None
+    if retention_diagnostic:
+        if config['mode'] != OFFICIAL_MODE:
+            parser.error('--retain-color-percent is only for official RGB checkpoints')
+        try:
+            start_step = retained_color_start_step(steps, args.retain_color_percent)
+        except ValueError as error:
+            parser.error(str(error))
     if args.sampler:
         if config["mode"] != OFFICIAL_MODE:
             parser.error("--sampler applies only to new official baseline checkpoints")
@@ -149,6 +165,10 @@ def main():
     exported_names = []
     cold_scores = {}
     direct_scores = {}
+    baseline_totals = {name: dict.fromkeys(('psnr', 'ssim', 'delta_e76'), 0.0)
+                       for name in ('raw', 'input')}
+    identity_totals = dict.fromkeys(('prediction_mae_255', 'direct_mae_255'), 0.0)
+    per_image_core = []
     prediction_dir = output / "predictions"
     direct_prediction_dir = output / "direct_predictions"
     evaluation_reference_dir = output / "references"
@@ -179,13 +199,18 @@ def main():
                 anchor = gray_anchor(raw_state)
                 state_to_rgb = normalized_lab_to_rgb
                 trajectory_color_space = "lab"
-            t = torch.full((raw.shape[0],), steps, device=device, dtype=torch.long)
+            if retention_diagnostic:
+                anchor = partial_raw_input(bridge, raw_state, start_step)
+            t = torch.full((raw.shape[0],), start_step, device=device, dtype=torch.long)
             if mode in iterative_modes:
                 direct_state = inference_model(anchor, t).clamp(-1, 1)
                 direct = state_to_rgb(direct_state)
-                pred_state, trajectory = bridge.sample(
-                    inference_model, anchor, return_trajectory=True
-                )
+                if retention_diagnostic:
+                    pred_state, trajectory = sample_from_step(bridge, inference_model, anchor, start_step)
+                else:
+                    pred_state, trajectory = bridge.sample(
+                        inference_model, anchor, return_trajectory=True
+                    )
             else:
                 direct_state = None
                 direct = None
@@ -222,6 +247,29 @@ def main():
                 direct_totals["ssim"] += batch_direct_ssim.sum().item()
                 direct_totals["delta_e76"] += batch_direct_delta_e.sum().item()
             count += raw.shape[0]
+            if retention_diagnostic:
+                baseline_scores = {}
+                for label, candidate in [('raw', raw), ('input', state_to_rgb(anchor))]:
+                    scores = {'psnr': psnr(candidate, reference), 'ssim': ssim(candidate, reference),
+                              'delta_e76': delta_e76(rgb_to_normalized_lab(candidate), target_lab)}
+                    baseline_scores[label] = scores
+                    for name, value in scores.items():
+                        baseline_totals[label][name] += value.sum().item()
+                distances = {'prediction_mae_255': (pred - raw).abs().flatten(1).mean(1) * 255,
+                             'direct_mae_255': (direct - raw).abs().flatten(1).mean(1) * 255}
+                for name, value in distances.items():
+                    identity_totals[name] += value.sum().item()
+                for index, name in enumerate(batch['name']):
+                    per_image_core.append({
+                        'image': name,
+                        **{label: {k: float(v[index].item()) for k, v in values.items()}
+                           for label, values in baseline_scores.items()},
+                        'prediction': {'psnr': float(batch_psnr[index]), 'ssim': float(batch_ssim[index]),
+                                       'delta_e76': float(batch_delta_e[index])},
+                        'direct': {'psnr': float(batch_direct_psnr[index]), 'ssim': float(batch_direct_ssim[index]),
+                                   'delta_e76': float(batch_direct_delta_e[index])},
+                        'output_vs_raw': {k: float(v[index].item()) for k, v in distances.items()},
+                    })
             if args.extended_metrics or mode == OFFICIAL_MODE or compact:
                 for image_index, name in enumerate(batch["name"]):
                     save_tensor_image(pred[image_index], prediction_dir / f"{name}.png")
@@ -241,7 +289,9 @@ def main():
             for image_index in range(raw.shape[0]):
                 if preview_saved >= args.preview_count:
                     break
-                stages = [("raw", raw), ("gray", state_to_rgb(anchor))]
+                input_label = (f'input {args.retain_color_percent:g}% (x{start_step})'
+                               if retention_diagnostic and start_step < steps else 'gray')
+                stages = [("raw", raw), (input_label, state_to_rgb(anchor))]
                 if direct is not None:
                     label = config["diffusion"]["sampler"] if mode == OFFICIAL_MODE else "Algorithm 2"
                     stages.extend([("direct", direct), (label, pred)])
@@ -255,7 +305,14 @@ def main():
                     display_scale=preview_scale,
                     max_side=args.preview_max_side,
                 )
-                if mode in iterative_modes:
+                if retention_diagnostic and start_step < steps:
+                    save_stage_strip(
+                        [(f'x{start_step-i} ({i}/{start_step} updates)', state_to_rgb(state))
+                         for i, state in enumerate(trajectory)],
+                        output / 'trajectories' / f'trajectory_{preview_saved:03d}.png',
+                        image_index=image_index, display_scale=preview_scale, max_side=args.preview_max_side,
+                    )
+                elif mode in iterative_modes:
                     save_trajectory_grid(
                         trajectory,
                         output / "trajectories" / f"trajectory_{preview_saved:03d}.png",
@@ -298,10 +355,31 @@ def main():
     if mode == OFFICIAL_MODE:
         metrics["evaluation"].update({
             "mode": mode, "sampler": config["diffusion"]["sampler"],
-            "diffusion_steps": steps, "start": "full_gray",
-            "effective_reverse_updates": steps if bridge.sampler == "paper_algorithm2" else steps - 1,
+            "diffusion_steps": steps, "start": "partial_raw" if start_step < steps else "full_gray",
+            "effective_reverse_updates": start_step if bridge.sampler == "paper_algorithm2" else start_step - 1,
             "checkpoint_implementation": config.get("implementation"),
         })
+    if retention_diagnostic:
+        metrics['baselines'] = {label: {k: v / count for k, v in scores.items()}
+                                for label, scores in baseline_totals.items()}
+        metrics['output_vs_raw'] = {k: v / count for k, v in identity_totals.items()}
+        digest = hashlib.sha256()
+        with checkpoint_path.open('rb') as handle:
+            for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b''):
+                digest.update(chunk)
+        metrics['evaluation'].update({
+            'retained_raw_color_percent': args.retain_color_percent, 'start_step': start_step,
+            'state_timesteps': list(range(start_step, -1, -1)), 'model_calls': start_step,
+            'input_source': 'raw only; UIEB GT is used only for scoring/display',
+            'input_formula': 'D(raw,s) = (1-s/T)*raw + (s/T)*mean_RGB(raw)',
+            'checkpoint_sha256': digest.hexdigest(),
+            'inference_source_sha256': {
+                path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in
+                (Path(__file__), Path(__file__).parent / 'src/gray_cold_diffusion/official_partial.py')
+            },
+            'interpretation': 'Returning to raw is desaturation inversion, not evidence of underwater enhancement.',
+        })
+        (report_dir / 'per_image_core.json').write_text(json.dumps(per_image_core, indent=2), encoding='utf-8')
     # Persist core evidence before optional metric models/downloads can fail.
     (report_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 

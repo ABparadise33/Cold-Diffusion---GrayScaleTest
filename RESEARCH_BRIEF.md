@@ -1,5 +1,36 @@
 # Research brief
 
+## Active diagnostic: official checkpoint, 5% / 25% raw color retained (2026-09-05)
+
+1. **Question/motivation:** Can weak raw color cues prevent gray/brown local
+   outputs in underwater transfer without retraining? Region-specific color
+   fidelity matters more than simply making water blue.
+2. **Hypothesis:** Starting the same official checkpoint at x19 (5%) or x15
+   (25%) improves fish/reef colors versus its x20 full-gray result. This is an
+   inference ablation, not proof that the model recognizes semantic categories.
+3. **Limitation:** User export official_rgb_retrain reports UIEB90 full-gray
+   paper Algorithm2 PSNR15.499, SSIM.73743, Delta-E76 25.934; viewed examples
+   show blue water but gray/brown reefs. Direct is similar. Input ambiguity,
+   training/data insufficiency and domain shift remain unresolved alternatives.
+4. **Leverage:** Reuse the DIV2K saturation1 step050000 EMA weights and unchanged
+   official own-prediction operator, T20, UIEB seed42 Test90, original-size256/32
+   tiling. Retained color is from raw ONLY, never UIEB reference.
+5. **Smallest test:** Analytic partial-step and 0%-equivalence CPU tests first;
+   then two UIEB90 inference passes at5/25%, paper_algorithm2, no training.
+   Model time starts at19/15, not20 with an incorrectly labeled partial input.
+6. **Failure meaning:** If colors remain wrong, partial raw cues did not solve
+   the transfer failure at these levels. If outputs merely revert to raw, the
+   test demonstrates inversion of desaturation, not underwater enhancement.
+7. **Success continuation:** Compare the same fish/reef regions and the full
+   paired test metrics against unchanged raw before changing data or training.
+8. **Evaluation:** Retain Direct, final predictions and named trajectories;
+   PSNR/SSIM/Delta-E against GT, raw and partial-input baselines, output-vs-raw
+   difference and per-image records. Optional legacy14 IQA metrics remain
+   available. Full-gray baseline remains separate; do not overwrite it.
+9. **Budget/stop:** No new training, dataset download or local real-checkpoint
+   inference. Stop after the two requested conditions and review. Do not
+   attribute a regional blue pattern to verified semantic understanding.
+
 ## Active gate: paper-aligned full-gray RGB baseline (2026-09-04)
 
 1. **Question/motivation:** Can a source-aligned Cold Diffusion colorizer learn
