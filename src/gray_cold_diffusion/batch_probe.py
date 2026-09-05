@@ -12,7 +12,7 @@ import torch
 import yaml
 
 from .color import denormalize_rgb, rgb_to_normalized_lab
-from .factory import OFFICIAL_MODE, build_model_and_bridge
+from .factory import UPSTREAM_MODES, build_model_and_bridge
 from .io import update_ema
 from .metrics import delta_e76, psnr, ssim, trajectory_monotonic_fraction
 
@@ -132,8 +132,8 @@ def select_batch(config_path, effective_batch, report_dir, runner=run_child):
 def probe_workload(config, batch_size, effective_batch, device, updates=3):
     """Match the tensor workload, with random data; CPU support is test-only."""
     device = torch.device(device)
-    if config['mode'] != OFFICIAL_MODE or config['training'].get('amp', False):
-        raise ValueError('probe requires the FP32 official RGB baseline')
+    if config['mode'] not in UPSTREAM_MODES or config['training'].get('amp', False):
+        raise ValueError('probe requires an FP32 upstream-model experiment')
     if batch_size < 1 or effective_batch % batch_size or updates < 2:
         raise ValueError('invalid batch/accumulation or insufficient warmup steps')
     torch.manual_seed(int(config['seed']))

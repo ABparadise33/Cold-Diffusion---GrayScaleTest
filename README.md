@@ -1,6 +1,29 @@
 # Cold Diffusion - GrayScaleTest
 
-## 目前先跑：官方 RGB 全灰階 baseline，飽和度 1
+## 目前先跑：空間色彩遮罩 pilot
+
+這次不再把所有像素的色差一起縮小。每個 timestep 會把更多**完整彩色像素**
+改成真正灰階；DIV2K、飽和度1、T20、模型與有效batch32維持不變。
+
+先跑到10k，使用自動batch探測：
+
+```bash
+git pull
+bash scripts/train_spatial_chroma_div2k_4090.sh --auto-batch
+```
+
+每1k驗證全部100張center crops，另隨機抽5張完整DIV2K validation影像到
+`outputs/div2k_spatial_chroma_sat1_t20_pilot/previews/step_XXXXXX/`。
+此實驗不輸出或評測Direct。10k結果值得繼續時，可沿用同一checkpoint續訓：
+
+```bash
+bash scripts/train_spatial_chroma_div2k_4090.sh --auto-batch --resume --max-steps 50000
+```
+
+不要把舊的full-gray或5% amplitude checkpoint拿來續訓，兩者的退化算子不同。
+[算子、訓練內容與停止條件](docs/spatial_chroma_pilot.md)
+
+## 前一輪：官方 RGB 全灰階 baseline，飽和度 1
 
 舊版是自訂小 U-Net／固定 gray(raw) bridge，**不是官方 colorization 完整復現**。
 這次新增獨立官方 ConvNeXt/attention 模型＋RGB退化，從全灰階開始，DIV2K、50k、

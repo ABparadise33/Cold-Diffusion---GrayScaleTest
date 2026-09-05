@@ -53,6 +53,7 @@ def save_full_scene_previews(trainer):
         'selected_images': [str(path) for path in selected], 'completed_images': [],
         'sampler': trainer.bridge.sampler, 'tile_size': cfg['preview_tile_size'],
         'tile_overlap': cfg['preview_tile_overlap'], 'display_max_side': cfg['preview_max_side'],
+        'direct_preview': bool(cfg.get('preview_direct', True)),
         'standalone_prediction': 'original geometry; no resize', 'status': 'in_progress',
     }
     metadata_path = output / 'preview.json'
@@ -74,19 +75,20 @@ def _save_one_preview(trainer, model, selected, output, cfg):
         rgb = _to_tensor(image.convert('RGB')).unsqueeze(0).to(trainer.device)
     anchor = channel_gray(normalize_rgb(rgb))
     t = torch.tensor([trainer.bridge.steps], device=trainer.device)
-    direct = denormalize_rgb(model(anchor, t))
-    x = anchor.clone()
-    # Keep trajectories on CPU, as before, releasing all scene tensors per image.
-    stages = [('s=T full gray', denormalize_rgb(x).cpu())]
-    for s in range(trainer.bridge.steps, 0, -1):
-        x = trainer.bridge.reverse_step(model, x, s)
-        stages.append((f'update {trainer.bridge.steps-s+1}/{trainer.bridge.steps}', denormalize_rgb(x).cpu()))
-    predicted = denormalize_rgb(x)
+    direct = denormalize_rgb(model(anchor, t)) if cfg.get('preview_direct', True) else None
+    predicted_state, trajectory = trainer.bridge.sample(model, anchor, return_trajectory=True)
+    # Keep trajectories on CPU, releasing all scene tensors per image.
+    stages = [('s=T full gray', denormalize_rgb(trajectory[0]).cpu())]
+    stages.extend((f'update {index}/{trainer.bridge.steps}', denormalize_rgb(state).cpu())
+                  for index, state in enumerate(trajectory[1:], 1))
+    predicted = denormalize_rgb(predicted_state)
     filename = f'{selected.stem}.png'
     save_tensor_image(predicted[0], output / 'predictions' / filename)
-    save_tensor_image(direct[0], output / 'direct_predictions' / filename)
-    save_stage_strip([('reference (original)', rgb), ('full gray', denormalize_rgb(anchor)),
-                      ('direct', direct), (trainer.bridge.sampler, predicted)],
-                     output / 'samples' / filename, max_side=int(cfg['preview_max_side']))
+    panels = [('reference (original)', rgb), ('full gray', denormalize_rgb(anchor))]
+    if direct is not None:
+        save_tensor_image(direct[0], output / 'direct_predictions' / filename)
+        panels.append(('direct', direct))
+    panels.append((trainer.bridge.sampler, predicted))
+    save_stage_strip(panels, output / 'samples' / filename, max_side=int(cfg['preview_max_side']))
     save_stage_strip(stages, output / 'trajectories' / filename, max_side=int(cfg['preview_max_side']))
     return {'image': str(selected), 'filename': filename, 'original_hw': list(rgb.shape[-2:])}

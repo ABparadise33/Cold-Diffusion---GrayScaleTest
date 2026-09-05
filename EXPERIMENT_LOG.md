@@ -2,6 +2,15 @@
 
 Record real experiments here. Do not treat smoke tests as scientific evidence.
 
+## 2026-09-05 — Implemented nested spatial-chroma-mask 10k pilot
+
+- User authorized training the proposed genuinely-missing-color experiment. Added a separate `spatial_chroma_colorization` mode and output; no old amplitude/full-gray checkpoint is compatible or auto-loaded. No paid-GPU or real DIV2K training was launched locally.
+- Operator: each pixel receives a continuous random score; `q_t=(T-t)/T`, and pixels with score below `q_t` retain complete RGB while all others become exact per-pixel channel-mean gray. A trajectory reuses one score map, so masks are nested from100% color at t0 to0% at t20. Training draws fresh maps. Sampling uses a seed42 isolated generator and does not perturb global training RNG. Intermediate counts are expected fractions, not exact counts.
+- Controlled recipe: DIV2K800/Val100, saturation1, T20, paper Algorithm2, upstream56.6M model,128 crops, Adam2e-5, FP32, effective batch32. Default run stops at10k; validation and five seeded random full-scene Val previews every1k. Direct validation/export is disabled for this mode. `latest.pt`, `best.pt` and the terminal numbered checkpoint support explicit continuation to50k.
+- Command: `bash scripts/train_spatial_chroma_div2k_4090.sh --auto-batch`; continuation only after reviewing the pilot: `bash scripts/train_spatial_chroma_div2k_4090.sh --auto-batch --resume --max-steps 50000`. Existing CUDA environment/DIV2K validation and output non-overwrite/free-space guards remain active.
+- Correctness evidence: binary-state/nested-mask tests cover0/50/5/0% endpoints; two different colors with equal RGB mean collapse to the same removed-color state. With a known clean oracle, Algorithm2 exactly follows every expected D(x,t) state and recovers x0. Tiny end-to-end CPU training writes a spatial checkpoint, original-geometry grouped preview, and no Direct preview/metric. Auto-batch accepts the new upstream mode; pre-spatial official checkpoints retain an explicitly exact fingerprint migration while unknown changes are rejected.
+- Verification: full CPU suite143 passed,1 real-CUDA-only skipped in49.01s. Targeted spatial/upstream suite38 passed,1 skipped; Ruff, shell syntax and diff checks passed. These verify software/operator behavior, not learned image quality or4090 duration. Stop at10k if validation evidence remains gray/speckled or fails to improve; only then decide whether50k/UIEB Test90 inference is justified.
+
 ## 2026-09-05 — Partial-color transfer returns raw; skip extra Direct in future evaluation
 
 - Source: `/Users/ed/Downloads/paper_algorithm2.zip`, archiveSHA ab3032b57228c38393afab77d47d11c06a76c2255a114aa6652c2436693577e6. Both conditions contain exactly the canonical90 names and original geometry; reported step50000, T20, paper_algorithm2,256/32tiling, starts19/15 and one identical checkpointSHA3ea20c78f3f35384f403e16bd0d8e3cba4311dba7bb0a94517bddab09eefc964. Actual weights are absent. Per-image report aggregates match JSON means; raw baselines agree across both conditions. Original ZIP and existing Direct outputs are unchanged.

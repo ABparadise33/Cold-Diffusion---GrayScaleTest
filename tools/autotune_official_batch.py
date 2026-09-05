@@ -10,7 +10,7 @@ import tempfile
 import yaml
 
 from gray_cold_diffusion.batch_probe import select_batch
-from gray_cold_diffusion.factory import OFFICIAL_MODE
+from gray_cold_diffusion.factory import UPSTREAM_MODES
 from gray_cold_diffusion.official_training import preflight_official_run
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,8 +26,8 @@ def launch(argv=None):
     if args.device != 'cuda':
         raise ValueError('--auto-batch requires --device cuda on the training GPU')
     config = yaml.safe_load(Path(args.config).read_text())
-    if config['mode'] != OFFICIAL_MODE:
-        raise ValueError('--auto-batch is only supported for the new official RGB baseline')
+    if config['mode'] not in UPSTREAM_MODES:
+        raise ValueError('--auto-batch is only supported for upstream-model experiments')
     if args.output_dir:
         config['output_dir'] = args.output_dir
     if args.max_steps is not None:

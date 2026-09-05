@@ -9,7 +9,7 @@ import yaml
 
 from gray_cold_diffusion.data import NaturalImageDataset, PairedImageDataset, seed_worker
 from gray_cold_diffusion.engine import Trainer
-from gray_cold_diffusion.factory import NATURAL_MODES, OFFICIAL_MODE, build_model_and_bridge
+from gray_cold_diffusion.factory import NATURAL_MODES, UPSTREAM_MODES, build_model_and_bridge
 from gray_cold_diffusion.io import select_device, set_seed
 
 
@@ -64,7 +64,7 @@ def main():
         )
 
     image_size = int(config["data"]["image_size"])
-    if config["mode"] == OFFICIAL_MODE:
+    if config["mode"] in UPSTREAM_MODES:
         from gray_cold_diffusion.official_training import preflight_official_run
         preflight_official_run(config, args)
     if config["mode"] in NATURAL_MODES:
@@ -135,7 +135,7 @@ def main():
     model, bridge = build_model_and_bridge(config)
     print(f"parameters={sum(p.numel() for p in model.parameters()):,}")
     trainer_class = Trainer
-    if config["mode"] == OFFICIAL_MODE:
+    if config["mode"] in UPSTREAM_MODES:
         from gray_cold_diffusion.official_training import OfficialTrainer
         trainer_class = OfficialTrainer
     trainer = trainer_class(model, bridge, train_loader, val_loader, config, device)

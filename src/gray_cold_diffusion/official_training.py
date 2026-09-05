@@ -17,10 +17,24 @@ from .official_preview import save_full_scene_previews
 from .report import save_training_report
 
 
+PRE_SPATIAL_SOURCE_SHA256 = {
+    'official_convnext.py': 'd71636fc0a4305f1eae12607587793a6816b7c68a681dc460170be2d16aa6dad',
+    'official_colorization.py': '075c913bbae6e0e315a6e6d612854514e76c70ecd2cbc6664eda0331a6069dde',
+    'official_training.py': '93dbac7ae808426de6da27d4d5c1c7f1028e41003c72026798df52847cba4c0c',
+    'official_preview.py': '073457955ab7d8926e4f1b7d4e9f66667cdf76d71f00e29950190ff3aff238ec',
+    'factory.py': '9771dd28f0120774040b956975fb6570023c0364c6c0b2c3af1dae9b14b44690',
+    'engine.py': '1d03b085a3916c805175eac1a55815f4526df928253d2da09c300e212e693e02',
+    'data.py': '3d36efdfcfda94b80063891fa1b489e54bd4934226ea4958f2891ffdcada5e29',
+    'color.py': '1928debe792621428efa9210ce4efda1d83fd772eca0d202ef42b63ef0b94ffa',
+    'io.py': '6f96d84bb17f8d949aeb32cd092b98cb152cb124d6edf0d10531e9761092985e',
+    'tiling.py': '09c61ac095572d105449dd6af6745bdcb3fca761a5806d3cc26278a92cc5355c',
+}
+
+
 def implementation_fingerprint():
     base = Path(__file__).parent
     names = ('official_convnext.py', 'official_colorization.py', 'official_training.py', 'official_preview.py',
-             'factory.py', 'engine.py', 'data.py', 'color.py', 'io.py', 'tiling.py')
+             'spatial_chroma.py', 'factory.py', 'engine.py', 'data.py', 'color.py', 'io.py', 'tiling.py')
     return {name: hashlib.sha256((base / name).read_bytes()).hexdigest() for name in names}
 
 
@@ -36,13 +50,22 @@ def compatible_preview_revision(saved, current):
         return False
     old_hashes = saved.get('source_sha256', {})
     new_hashes = current.get('source_sha256', {})
-    if old_hashes.get('official_training.py') != '789c81f26dfa83f4c739c4d2f12adb87b1769a0af593ac98983af4d6cf9c7b3c':
-        return False
-    if 'official_preview.py' in old_hashes or 'official_preview.py' not in new_hashes:
-        return False
-    migrated = {**old_hashes, 'official_training.py': new_hashes.get('official_training.py'),
-                'official_preview.py': new_hashes['official_preview.py']}
-    return {**saved, 'source_sha256': migrated} == current
+    candidates = [old_hashes]
+    if (old_hashes.get('official_training.py') ==
+            '789c81f26dfa83f4c739c4d2f12adb87b1769a0af593ac98983af4d6cf9c7b3c'
+            and 'official_preview.py' not in old_hashes):
+        candidates.extend([
+            {**old_hashes, 'official_training.py': new_hashes.get('official_training.py'),
+             'official_preview.py': new_hashes['official_preview.py']},
+            {**old_hashes, 'official_training.py': PRE_SPATIAL_SOURCE_SHA256['official_training.py'],
+             'official_preview.py': PRE_SPATIAL_SOURCE_SHA256['official_preview.py']},
+        ])
+    for hashes in candidates:
+        if hashes == PRE_SPATIAL_SOURCE_SHA256:
+            hashes = new_hashes
+        if {**saved, 'source_sha256': hashes} == current:
+            return True
+    return False
 
 
 def preflight_official_run(config, args):
@@ -71,17 +94,25 @@ def preflight_official_run(config, args):
         raise ValueError('official DIV2K run needs --train-dir and --val-dir')
     if Path(args.train_dir).resolve() == Path(args.val_dir).resolve():
         raise ValueError('train and validation directories must be different')
+    spatial = config['mode'] == 'spatial_chroma_colorization'
     config['implementation'] = {
         'upstream_commit': UPSTREAM_COMMIT,
         'source_sha256': implementation_fingerprint(),
         'start': 'full_gray', 'public_time': 's=1..T; upstream label=s-1',
         'sampler': config['diffusion']['sampler'],
     }
+    if spatial:
+        config['implementation'].update(
+            operator='nested spatial RGB-chroma mask; expected retained fraction=(T-t)/T',
+            sampling_seed=int(config['diffusion'].get('sampling_seed', config['seed'])),
+            status='novel experiment; not the paper RGB amplitude operator',
+        )
     config['data']['train_dir'] = str(Path(args.train_dir).resolve())
     config['data']['val_dir'] = str(Path(args.val_dir).resolve())
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
-    print(f'OFFICIAL RGB / FULL GRAY / saturation1 / FP32 / effective batch={cfg["batch_size"] * cfg["grad_accum"]}')
+    label = 'SPATIAL CHROMA MASK' if spatial else 'OFFICIAL RGB / FULL GRAY'
+    print(f'{label} / saturation1 / FP32 / effective batch={cfg["batch_size"] * cfg["grad_accum"]}')
     print(f'sampler={config["diffusion"]["sampler"]}; fresh unless resume explicitly requested')
 
 
@@ -114,6 +145,9 @@ class OfficialTrainer(Trainer):
             revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
         except (OSError, subprocess.CalledProcessError):
             revision = None
+        preview_folders = ['samples', 'trajectories', 'predictions']
+        if self.config['training'].get('preview_direct', True):
+            preview_folders.append('direct_predictions')
         return {'config': self.config, 'data': data, 'code_commit': revision,
                 'parameters': sum(p.numel() for p in self.model.parameters()),
                 'torch': torch.__version__, 'cuda_runtime': torch.version.cuda,
@@ -125,7 +159,7 @@ class OfficialTrainer(Trainer):
                 'preview': {'count': int(self.config['training'].get('preview_count', 5)),
                             'every': self.config['training']['validate_every'], 'also_at_final_step': True,
                             'selection': 'local seed+step RNG; validation split only',
-                            'layout': 'previews/step_<step>/{samples,trajectories,predictions,direct_predictions}'}}
+                            'layout': f'previews/step_<step>/{{{",".join(preview_folders)}}}'}}
 
     def _write_manifest(self):
         (self.output / 'run_manifest.json').write_text(json.dumps(self.run_metadata, indent=2))
@@ -182,15 +216,17 @@ class OfficialTrainer(Trainer):
     @torch.no_grad()
     def validate(self):
         self.ema.eval()
-        totals = dict.fromkeys(('psnr', 'ssim', 'delta_e76', 'monotonic', 'val_l1',
-                                'direct_delta_e76', 'gray_delta_e76', 'pred_chroma', 'target_chroma',
-                                'direct_val_l1'), 0.0)
+        include_direct = self.config['training'].get('validation_direct', True)
+        names = ['psnr', 'ssim', 'delta_e76', 'monotonic', 'val_l1', 'gray_delta_e76',
+                 'pred_chroma', 'target_chroma']
+        if include_direct:
+            names.extend(['direct_delta_e76', 'direct_val_l1'])
+        totals = dict.fromkeys(names, 0.0)
         count = 0
         for batch in self.val_loader:  # no max_val_batches truncation
             _, reference, _, target, anchor = self._prepare(batch)
             t = torch.full((len(target),), self.bridge.steps, device=self.device, dtype=torch.long)
-            direct_state = self.ema(anchor, t)
-            direct = denormalize_rgb(direct_state)
+            direct_state = self.ema(anchor, t) if include_direct else None
             state, trajectory = self.bridge.sample(self.ema, anchor, return_trajectory=True)
             pred = denormalize_rgb(state)
             pred_lab, target_lab = rgb_to_normalized_lab(pred), rgb_to_normalized_lab(reference)
@@ -198,10 +234,12 @@ class OfficialTrainer(Trainer):
             totals['psnr'] += psnr(pred, reference).sum().item()
             totals['ssim'] += ssim(pred, reference).sum().item()
             totals['delta_e76'] += delta_e76(pred_lab, target_lab).sum().item()
-            totals['direct_delta_e76'] += delta_e76(rgb_to_normalized_lab(direct), target_lab).sum().item()
+            if direct_state is not None:
+                direct = denormalize_rgb(direct_state)
+                totals['direct_delta_e76'] += delta_e76(rgb_to_normalized_lab(direct), target_lab).sum().item()
+                totals['direct_val_l1'] += (direct_state - target).abs().mean().item() * n
             totals['gray_delta_e76'] += delta_e76(rgb_to_normalized_lab(denormalize_rgb(anchor)), target_lab).sum().item()
             totals['val_l1'] += (state - target).abs().mean().item() * n
-            totals['direct_val_l1'] += (direct_state - target).abs().mean().item() * n
             totals['pred_chroma'] += (pred_lab[:, 1:].square().sum(1).sqrt() * 128).mean().item() * n
             totals['target_chroma'] += (target_lab[:, 1:].square().sum(1).sqrt() * 128).mean().item() * n
             labs = [rgb_to_normalized_lab(denormalize_rgb(x)) for x in trajectory]

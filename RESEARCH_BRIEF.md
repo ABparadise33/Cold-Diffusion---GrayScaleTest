@@ -1,5 +1,30 @@
 # Research brief
 
+## Active experiment: nested spatial chroma-mask pilot (2026-09-05)
+
+1. **Question/motivation:** Can a DIV2K natural-image prior fill locally absent
+   chroma instead of amplifying weak but invertible underwater chroma?
+2. **Hypothesis:** Keeping full RGB at a shrinking subset of pixels and making
+   every other pixel exactly channel-mean gray creates a meaningful missing-data
+   task. It may still fail through ambiguity/domain shift; it is not a claimed fix.
+3. **Current limitation:** The completed 5% amplitude run is near raw and remains
+   analytically invertible. Full-gray transfer is weak and does not isolate whether
+   sparse genuine hints can support completion.
+4. **Leverage:** Hold DIV2K, saturation1, T20, seed42, upstream56.6M model, optimizer
+   and effective batch32 fixed. Change only the operator to nested pixel masks.
+5. **Smallest falsifiable test:** Authorized 10k pilot, validation every1k on all
+   Val100 center crops plus five seeded random full-scene previews. Training samples
+   fresh masks; each Algorithm2 trajectory reuses one fixed mask map.
+6. **Failure meaning:** Gray regions, speckled incoherent color, or no improving
+   validation evidence by10k means stop before50k. It does not prove that all
+   alternative hint geometry or larger colorization datasets fail.
+7. **Success continuation:** Resume the same run to50k, then add a matched UIEB
+   Test90 0%/5%-spatial inference comparison. Do not use old amplitude checkpoints.
+8. **Evaluation:** Train/validation L1, PSNR, SSIM, Delta-E76, chroma ratio,
+   monotonicity, original-size predictions and trajectories. Direct is disabled.
+9. **Budget/stop:** Default10k; only explicit resume extends to50k. No sat2 or
+   T100/T200 change. No real paid-GPU training has been launched from this machine.
+
 ## Current decision: partial color reverts to raw; rethink information removal (2026-09-05)
 
 1. **Question/motivation:** Can a natural-image color prior fill genuinely

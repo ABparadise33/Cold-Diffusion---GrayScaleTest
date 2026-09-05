@@ -15,7 +15,11 @@ from gray_cold_diffusion.data import _to_tensor
 from gray_cold_diffusion.io import _tensor_to_pil
 from gray_cold_diffusion.official_colorization import RGBDecolorization, channel_gray
 from gray_cold_diffusion.official_preview import save_full_scene_previews, select_preview_images
-from gray_cold_diffusion.official_training import compatible_preview_revision, implementation_fingerprint
+from gray_cold_diffusion.official_training import (
+    PRE_SPATIAL_SOURCE_SHA256,
+    compatible_preview_revision,
+    implementation_fingerprint,
+)
 from gray_cold_diffusion.tiling import TiledModel
 
 
@@ -113,3 +117,8 @@ def test_preview_migration_does_not_relax_other_source_or_sampler_checks():
     modified = copy.deepcopy(old)
     modified['sampler'] = 'official_code'
     assert not compatible_preview_revision(modified, current)
+    pre_spatial = copy.deepcopy(current)
+    pre_spatial['source_sha256'] = PRE_SPATIAL_SOURCE_SHA256
+    assert compatible_preview_revision(pre_spatial, current)
+    pre_spatial['source_sha256'] = {**PRE_SPATIAL_SOURCE_SHA256, 'factory.py': 'unrecognized hash'}
+    assert not compatible_preview_revision(pre_spatial, current)

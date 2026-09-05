@@ -115,6 +115,16 @@ def test_probe_runs_adam_ema_accumulation_and_validation_on_cpu():
     assert result['checks'] == ['training_forward_backward', 'adam_states', 'ema', 'full_gray_crop_validation']
 
 
+def test_probe_accepts_spatial_chroma_upstream_mode_on_cpu():
+    config = yaml.safe_load((ROOT / 'configs/div2k_spatial_chroma_sat1_t20_pilot.yaml').read_text())
+    config['model'].update(dim=8, dim_mults=[1, 2])
+    config['data']['image_size'] = 16
+    config['diffusion']['steps'] = 2
+    result = batch_probe.probe_workload(config, 1, 1, 'cpu', updates=2)
+    assert result['status'] == 'ok'
+    assert result['parameters'] > 0
+
+
 def test_child_protocol_uses_a_separate_process_and_log(tmp_path, monkeypatch):
     def fake_run(command, stdout, stderr, timeout):
         assert command[1:4] == ['-u', '-m', 'gray_cold_diffusion.batch_probe']
