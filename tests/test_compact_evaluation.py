@@ -43,7 +43,7 @@ def test_compact_export_preserves_predictions_and_scores(tmp_path):
         command = [sys.executable, 'evaluate.py', '--checkpoint', str(checkpoint),
                    '--raw-dir', str(raw_dir), '--reference-dir', str(gt_dir),
                    '--split-file', str(manifest), '--original-size', '--batch-size', '1',
-                   '--device', 'cpu', '--output-dir', str(tmp_path / layout), '--output-layout', layout]
+                   '--device', 'cpu', '--output-dir', str(tmp_path / layout), '--output-layout', layout, '--include-direct']
         result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, result.stdout + result.stderr
     legacy, compact = tmp_path / 'legacy', tmp_path / 'compact'

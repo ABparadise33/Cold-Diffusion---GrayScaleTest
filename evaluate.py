@@ -38,6 +38,8 @@ def main():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--expected-checkpoint-step", type=int,
                         help="optional guard against evaluating best.pt from an unintended training step")
+    parser.add_argument('--include-direct', action='store_true',
+                        help='opt-in historical Direct comparison; default skips its extra pass and all Direct exports')
     parser.add_argument("--sampler", choices=["paper_algorithm2", "official_code"],
                         help="official baseline only; override sampling, never weights or training")
     parser.add_argument("--retain-color-percent", type=float,
@@ -134,9 +136,10 @@ def main():
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     totals = {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0, "monotonic": 0.0}
     iterative_modes = ITERATIVE_MODES
+    compute_direct = args.include_direct and config['mode'] in iterative_modes
     direct_totals = (
         {"psnr": 0.0, "ssim": 0.0, "delta_e76": 0.0}
-        if config["mode"] in iterative_modes
+        if compute_direct
         else None
     )
     count = 0
@@ -167,7 +170,9 @@ def main():
     direct_scores = {}
     baseline_totals = {name: dict.fromkeys(('psnr', 'ssim', 'delta_e76'), 0.0)
                        for name in ('raw', 'input')}
-    identity_totals = dict.fromkeys(('prediction_mae_255', 'direct_mae_255'), 0.0)
+    identity_totals = {'prediction_mae_255': 0.0}
+    if compute_direct:
+        identity_totals['direct_mae_255'] = 0.0
     per_image_core = []
     prediction_dir = output / "predictions"
     direct_prediction_dir = output / "direct_predictions"
@@ -203,8 +208,10 @@ def main():
                 anchor = partial_raw_input(bridge, raw_state, start_step)
             t = torch.full((raw.shape[0],), start_step, device=device, dtype=torch.long)
             if mode in iterative_modes:
-                direct_state = inference_model(anchor, t).clamp(-1, 1)
-                direct = state_to_rgb(direct_state)
+                direct = None
+                if compute_direct:
+                    direct_state = inference_model(anchor, t).clamp(-1, 1)
+                    direct = state_to_rgb(direct_state)
                 if retention_diagnostic:
                     pred_state, trajectory = sample_from_step(bridge, inference_model, anchor, start_step)
                 else:
@@ -255,8 +262,9 @@ def main():
                     baseline_scores[label] = scores
                     for name, value in scores.items():
                         baseline_totals[label][name] += value.sum().item()
-                distances = {'prediction_mae_255': (pred - raw).abs().flatten(1).mean(1) * 255,
-                             'direct_mae_255': (direct - raw).abs().flatten(1).mean(1) * 255}
+                distances = {'prediction_mae_255': (pred - raw).abs().flatten(1).mean(1) * 255}
+                if direct is not None:
+                    distances['direct_mae_255'] = (direct - raw).abs().flatten(1).mean(1) * 255
                 for name, value in distances.items():
                     identity_totals[name] += value.sum().item()
                 for index, name in enumerate(batch['name']):
@@ -266,10 +274,13 @@ def main():
                            for label, values in baseline_scores.items()},
                         'prediction': {'psnr': float(batch_psnr[index]), 'ssim': float(batch_ssim[index]),
                                        'delta_e76': float(batch_delta_e[index])},
-                        'direct': {'psnr': float(batch_direct_psnr[index]), 'ssim': float(batch_direct_ssim[index]),
-                                   'delta_e76': float(batch_direct_delta_e[index])},
                         'output_vs_raw': {k: float(v[index].item()) for k, v in distances.items()},
                     })
+                    if direct is not None:
+                        per_image_core[-1]['direct'] = {
+                            'psnr': float(batch_direct_psnr[index]), 'ssim': float(batch_direct_ssim[index]),
+                            'delta_e76': float(batch_direct_delta_e[index]),
+                        }
             if args.extended_metrics or mode == OFFICIAL_MODE or compact:
                 for image_index, name in enumerate(batch["name"]):
                     save_tensor_image(pred[image_index], prediction_dir / f"{name}.png")
@@ -292,9 +303,11 @@ def main():
                 input_label = (f'input {args.retain_color_percent:g}% (x{start_step})'
                                if retention_diagnostic and start_step < steps else 'gray')
                 stages = [("raw", raw), (input_label, state_to_rgb(anchor))]
-                if direct is not None:
+                if mode in iterative_modes:
                     label = config["diffusion"]["sampler"] if mode == OFFICIAL_MODE else "Algorithm 2"
-                    stages.extend([("direct", direct), (label, pred)])
+                    if direct is not None:
+                        stages.append(('direct', direct))
+                    stages.append((label, pred))
                 else:
                     stages.append(("prediction", pred))
                 stages.append(("reference", reference))
@@ -342,6 +355,7 @@ def main():
         "reference_exports": bool(exported_names) and not compact,
         "raw_dir": str(Path(args.raw_dir).resolve()),
         "reference_dir": str(Path(args.reference_dir).resolve()),
+        "direct_evaluated": compute_direct,
     }
     if mode in NATURAL_MODES:
         metrics["evaluation"]["training_saturation_factor"] = float(

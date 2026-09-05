@@ -50,7 +50,8 @@ def test_evaluate_groups_previews_without_changing_geometry(tmp_path: Path, mode
     assert json.loads((output / "metrics.json").read_text())["evaluation"]["num_images"] == 1
     iterative = mode != "gray_oneshot"
     with Image.open(output / "batches" / "batch_000.png") as strip:
-        assert strip.size == (width * (5 if iterative else 4), height + 28)
+        assert strip.size == (width * 4, height + 28)
+    assert not (output / 'direct_predictions').exists()
     trajectory = output / "trajectories" / "trajectory_000.png"
     if iterative:
         with Image.open(trajectory) as strip:

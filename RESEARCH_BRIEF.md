@@ -1,5 +1,41 @@
 # Research brief
 
+## Current decision: partial color reverts to raw; rethink information removal (2026-09-05)
+
+1. **Question/motivation:** Can a natural-image color prior fill genuinely
+   missing colors rather than amplify attenuated underwater color cast?
+2. **Hypothesis:** Reducing chroma amplitude is the wrong information bottleneck:
+   it stays invertible for nonzero retention. Spatially removing chroma at most
+   pixels would require inference of missing colors. This is a proposed new
+   operator experiment, not an authorized training run or a demonstrated fix.
+3. **Current limitation:** Official5/25% Test90 DE21.931/21.889 versus raw21.808;
+   output-vs-raw MAE1.115/.537 on0–255 floats. Repeated Test90 is exploratory.
+   Actual0.5% neural inference is untested; analytical float32 inversion already
+   recovers raw to0.000705/255 on a spatial-stride8 control of all90 images.
+4. **Leverage:** Same natural data/model/sat1/T20 as a controlled starting point;
+   color masking can remove local chroma without pretending that .5% amplitude
+   means .5% pixels or .5% information. Keep these meanings explicitly separate.
+5. **Smallest test:** Before training, define nested deterministic masks and an
+   endpoint-consistent forward/reverse operator, test preservation of visible
+   hints and non-uniqueness of hidden chroma. Then, only after approval, propose
+   20 DIV2K train scenes and10 disjoint validation scenes, bounded2k optimizer
+   updates or2 GPU-hours (whichever first); hold saturation/T fixed.
+6. **Failure meaning:** Failure to beat gray/simple hint-propagation on held-out
+   missing-color pixels means no evidence of useful learned color completion;
+   do not scale. Passing this does not establish water dehazing or correct hues
+   for all ambiguous objects. A new mask input to old weights is an OOD probe,
+   not a matched-training comparison.
+7. **Success continuation:** Scale natural validation only after the toy gate;
+   revisit UIEB with unchanged names and raw baselines, then independent data.
+8. **Evaluation:** Masked-region Delta-E/chroma plus full-image quality and hint
+   consistency; predicted original-size PNGs/trajectories. No extra Direct
+   evaluation by default. Pure chroma operators still preserve per-pixel RGB
+   mean in Algorithm2, so full underwater brightness/haze repair is out of scope.
+9. **Budget/stop:** No sat2/T100/T200 training or modified schedule implemented.
+   Increasing uniform T cannot remove invertibility and reduces endpoint
+   sampling probability at fixed update budget; nonlinear T20 could include
+   1%/.5% but requires matched retraining and is lower priority than task design.
+
 ## Active diagnostic: official checkpoint, 5% / 25% raw color retained (2026-09-05)
 
 1. **Question/motivation:** Can weak raw color cues prevent gray/brown local

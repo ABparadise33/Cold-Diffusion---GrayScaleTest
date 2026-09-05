@@ -211,7 +211,7 @@ def test_fresh_training_resume_full_scene_and_both_evaluations(tmp_path):
         run_cli(['evaluate.py', '--checkpoint', str(checkpoint), '--raw-dir', str(val_dir),
                  '--reference-dir', str(val_dir), '--split-file', str(split), '--device', 'cpu',
                  '--original-size', '--batch-size', '1', '--tile-size', '16', '--tile-overlap', '4',
-                 '--sampler', sampler, '--output-dir', str(evaluation)], tmp_path)
+                 '--sampler', sampler, '--output-dir', str(evaluation), '--include-direct'], tmp_path)
         metadata = json.loads((evaluation / '其餘/metrics.json').read_text())['evaluation']
         assert metadata['sampler'] == sampler
         assert metadata['num_images'] == 2

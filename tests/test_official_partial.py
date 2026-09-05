@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -69,7 +70,7 @@ def test_partial_does_not_clip_internal_states_or_relax_full_gray_guard():
     assert pred.max() > 1 and pred.min() < -1
 
 
-def test_cli_zero_equivalence_partial_exports_baselines_and_no_gt_leak(tmp_path):
+def test_cli_zero_equivalence_partial_exports_baselines_and_no_gt_leak(tmp_path, monkeypatch):
     torch.set_num_threads(1)
     raw_dir, ref_dir = tmp_path / 'raw', tmp_path / 'gt'
     raw_dir.mkdir()
@@ -86,15 +87,17 @@ def test_cli_zero_equivalence_partial_exports_baselines_and_no_gt_leak(tmp_path)
     model, _ = build_model_and_bridge(config)
     checkpoint = tmp_path / 'step_050000.pt'
     torch.save({'config': config, 'ema': model.state_dict(), 'step': 50000}, checkpoint)
-    command = [sys.executable, 'evaluate.py', '--checkpoint', str(checkpoint), '--expected-checkpoint-step', '50000',
+    command = [sys.executable, 'evaluate.py', '--checkpoint', str(checkpoint), '--expected-checkpoint-step', '50000', '--include-direct',
                '--raw-dir', str(raw_dir), '--reference-dir', str(ref_dir), '--split-file', str(split),
                '--device', 'cpu', '--original-size', '--batch-size', '1', '--preview-count', '1']
     env = {**os.environ, 'PYTHONPATH': str(ROOT / 'src'), 'OMP_NUM_THREADS': '1',
            'MPLCONFIGDIR': str(tmp_path / 'mpl')}
 
-    def run(label, percent=None):
+    def run(label, percent=None, include_direct=True):
         output = tmp_path / label
         args = command + ['--output-dir', str(output)]
+        if not include_direct:
+            args.remove('--include-direct')
         if percent is not None:
             args += ['--retain-color-percent', str(percent)]
         result = subprocess.run(args, cwd=ROOT, env=env, capture_output=True, text=True, timeout=90)
@@ -127,6 +130,44 @@ def test_cli_zero_equivalence_partial_exports_baselines_and_no_gt_leak(tmp_path)
     assert changed_metrics['delta_e76'] != metrics['delta_e76']
     for directory in ('predictions', 'direct_predictions'):
         assert (changed / directory / 'a.png').read_bytes() == (output / directory / 'a.png').read_bytes()
+    no_direct, no_direct_metrics = run('no_direct', 25, include_direct=False)
+    assert (no_direct / 'predictions/a.png').read_bytes() == (changed / 'predictions/a.png').read_bytes()
+    assert (no_direct / 'trajectories/trajectory_000.png').read_bytes() == (changed / 'trajectories/trajectory_000.png').read_bytes()
+    assert no_direct_metrics['evaluation']['direct_evaluated'] is False
+    assert 'direct' not in no_direct_metrics
+    assert 'direct_mae_255' not in no_direct_metrics['output_vs_raw']
+    assert 'direct' not in json.loads((no_direct / '其餘/per_image_core.json').read_text())[0]
+    assert not (no_direct / 'direct_predictions').exists()
+    with Image.open(no_direct / 'batches/batch_000.png') as image:
+        assert image.size == (25 * 4, 17 + 28)
+    # Count real network forwards: only the 15 reverse steps, no extra Direct pass.
+    # Also exercise optional IQA routing without downloading any learned metric.
+    spec = importlib.util.spec_from_file_location('eval_under_test', ROOT / 'evaluate.py')
+    evaluator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(evaluator)
+    build = evaluator.build_model_and_bridge
+    calls, metric_calls = [], []
+
+    def counted_build(config):
+        model, bridge = build(config)
+        model.register_forward_hook(lambda _model, _inputs, _output: calls.append(1))
+        return model, bridge
+
+    def fake_extended(**kwargs):
+        metric_calls.append(kwargs['prediction_dir'].name)
+        assert kwargs['reference_loader']('a').size == (25, 17)
+        return {'means': {}, 'num_images': 1}
+
+    monkeypatch.setattr(evaluator, 'build_model_and_bridge', counted_build)
+    monkeypatch.setattr(evaluator, 'create_pyiqa_metrics', lambda _device: {})
+    monkeypatch.setattr(evaluator, 'evaluate_extended_metrics', fake_extended)
+    args = command[1:] + ['--output-dir', str(tmp_path / 'counted'), '--retain-color-percent', '25', '--extended-metrics']
+    args.remove('--include-direct')
+    monkeypatch.setattr(sys, 'argv', args)
+    evaluator.main()
+    assert len(calls) == 15
+    assert metric_calls == ['predictions']
+    assert not list((tmp_path / 'counted').rglob('direct*'))
     wrong_step = subprocess.run(command + ['--expected-checkpoint-step', '15000', '--output-dir', str(tmp_path / 'bad')],
                                 cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
     assert wrong_step.returncode != 0 and 'expected 15000' in wrong_step.stderr

@@ -40,9 +40,12 @@ bash scripts/evaluate_official_uieb_4090.sh
 ```
 
 沿用 `splits/uieb_seed42.json` 的 90 張水下影像，分別輸出兩種 sampler 的結果。
-每組保留 `predictions/`、`direct_predictions/`、`batches/`、`trajectories/`；
+每組保留 `predictions/`、`batches/`、`trajectories/`；
 三份報表放入 `其餘/`，不另存 `references/`。GT 仍用於評分與對照圖。
 預測 PNG 保持原圖寬高；預設 batch／trajectory 預覽各 4 張。
+後續 `evaluate.py` 預設不執行額外 Direct 推論、不另存 Direct 圖片或分數。
+只有重做歷史對照時才明確加 `--include-direct`；既有 Direct 檔案不自動刪除。
+Algorithm2 每一步必要的模型預測仍會執行，沒有改成別的取樣方式。
 
 已跑完的結果不用重推論，可直接整理（只移除輸出的 reference 副本，不動資料集）：
 
@@ -66,6 +69,9 @@ bash scripts/evaluate_official_partial_uieb_4090.sh
 `其餘/metrics.json` 另含 raw／實際輸入基準與輸出對raw差距，逐圖資料在
 `其餘/per_image_core.json`。若只是變回raw，不能當成水下修復成功。
 需要全部90張對照／軌跡可加 `--preview-count 90`；需要14項舊IQA可加 `--extended-metrics`。
+
+本輪已完成，**5%／25%主要接近raw，沒有超過raw基準**；不必為了移除Direct重跑。
+[結果、色彩縮小與資訊損失的差別、下一步建議](docs/official_partial_findings.md)。
 
 ## 以下保留舊實驗說明
 

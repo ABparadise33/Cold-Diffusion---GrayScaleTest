@@ -165,14 +165,13 @@ bash scripts/evaluate_official_uieb_4090.sh
 - `paper_algorithm2`：論文公式，20次更新；主要 baseline。
 - `official_code`：保留固定版本原始碼的時間索引，20次模型呼叫但19次有效更新。
 
-兩者的 Direct 使用相同權重與全灰階輸入。**它們不是兩次訓練**，也不是
+兩者使用相同權重與全灰階輸入。**它們不是兩次訓練**，也不是
 `gray_oneshot`。不因為都叫Algorithm2就把索引差異藏起來。
 結果在 `evaluation/div2k_official_rgb_sat1.00x_uieb_test90_step050000/<sampler>/`：
 
 ```text
 <sampler>/
   predictions/                  # 90張，反推最終輸出，原始寬高
-  direct_predictions/           # 90張，同一權重的Direct，暫時保留
   batches/                      # 對照圖，包含GT；預設4張預覽
   trajectories/                 # 左→右軌跡；預設4張預覽
   其餘/
@@ -181,6 +180,12 @@ bash scripts/evaluate_official_uieb_4090.sh
     training_summary.json
 ```
 
+依新需求，`evaluate.py` 預設略過額外的 Direct forward、PNG、分數與比較表。
+要重現歷史對照才加 `--include-direct`；`--output-layout legacy` 本身不會開啟 Direct。
+Algorithm2 內部各step的模型預測不省略，最終輸出與軌跡數值不變；對照圖變成
+raw／input／prediction／reference 四欄。既有 Direct 資料不刪除。
+此修改是評測流程；訓練模型、checkpoint與既有training-validation指標定義不變。
+
 曲線及訓練摘要需要 checkpoint 所屬訓練資料夾中的 `metrics.csv`；找不到時會警告，
 不捏造曲線。可用 `--training-metrics` 指定檔案。`references/` 不另存，原始 GT
 仍留在資料集。預設獨立 PNG 不縮放，對照圖／軌跡顯示縮圖最長邊 512；
@@ -188,8 +193,8 @@ bash scripts/evaluate_official_uieb_4090.sh
 
 需要舊14項指標時在指令後加 `--extended-metrics`，可能下載其評分模型。
 第一次可先用預設，避免評分模型下載阻擋看圖；核心分數會先存下來。
-額外產生的 `extended_metrics`、`direct_metrics`、`direct_vs_algorithm2` 的 CSV／MD
-也放在 `其餘/`。額外評分直接重新載入相同前處理的 GT，再做與舊 PNG 匯出相同的
+額外產生的 `extended_metrics` CSV／MD也放在 `其餘/`；只有明確開啟Direct對照才有
+`direct_metrics`、`direct_vs_algorithm2`。額外評分直接重新載入相同前處理的 GT，再做與舊 PNG 匯出相同的
 8-bit 量化，不需要重新輸出 references。
 
 已完成的舊格式 UIEB 結果可整理，**不用重新推論**：
@@ -206,7 +211,8 @@ bash scripts/evaluate_official_uieb_4090.sh
 UIEB 資料重建，資料集本身不會被修改。舊報表內容保留為當次推論紀錄，不重算分數。
 
 新的 official 評測預設採這個精簡結構（`--output-layout auto`）；舊 Lab／小 U-Net
-模式的預設輸出不變。明確指定 `--output-layout legacy` 可保留舊格式。
+模式的資料夾配置不變，但 `evaluate.py` 同樣預設不做額外Direct。明確指定
+`--output-layout legacy --include-direct` 可重做舊格式的Direct比較。
 
 DIV2K Val100 域內對照仍可單獨執行 `bash scripts/evaluate_official_div2k_4090.sh`，
 輸出在 `evaluation/div2k_official_rgb_sat1.00x_step050000/<sampler>/`，不要與 UIEB
@@ -241,7 +247,7 @@ s−1次有效更新（5%=18、25%=14），勿混報為paper版。這是該索�
 ```text
 evaluation/official_rgb_partial_uieb_test90_step050000/paper_algorithm2/
   retain_5pct/
-    predictions/ / direct_predictions/ / batches/ / trajectories/
+    predictions/ / batches/ / trajectories/
     其餘/metrics.json
     其餘/per_image_core.json
     其餘/training_curves.png / training_summary.json  # 原訓練metrics.csv可用時
@@ -252,8 +258,9 @@ evaluation/official_rgb_partial_uieb_test90_step050000/paper_algorithm2/
 x15…x0。GT只作評分與對照顯示，不輸出references副本。
 `metrics.json`記錄實際checkpoint step與SHA256、split SHA、起點、retention、
 模型呼叫數與inference source SHA；腳本驗證checkpoint確為50000步。
-同時評分未處理raw、實際部分色彩輸入、Direct、最終output，並記錄output/direct
+同時評分未處理raw、實際部分色彩輸入、最終output，並記錄output
 對raw的RGB MAE（0–255尺度）；`per_image_core.json`保留每張數值，避免只看平均。
+Direct欄位僅在明確使用 `--include-direct` 時產生。
 
 控制判讀：先看相同魚／礁石區域是否恢復合理的多種色彩，再檢查最終分數有沒有超過
 raw。如果輸出接近raw但沒有超過raw，只能支持反轉人工去彩，不能聲稱學會水下修復。
