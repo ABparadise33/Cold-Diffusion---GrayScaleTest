@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 import yaml
 
 from gray_cold_diffusion.data import NaturalImageDataset, PairedImageDataset, seed_worker
@@ -127,7 +127,16 @@ def main():
         worker_init_fn=seed_worker,
         generator=generator,
     )
-    train_loader = DataLoader(train_dataset, shuffle=True, drop_last=True, **loader_args)
+    sampler = None
+    if config['data'].get('mixed_domains'):
+        from gray_cold_diffusion.mixed_training import domain_weights, mixed_fingerprint
+        if config['mode'] != 'official_rgb_colorization':
+            raise ValueError('mixed pilot requires official_rgb_colorization')
+        config['implementation']['mixed_sha256'] = mixed_fingerprint()
+        sampler = WeightedRandomSampler(domain_weights(train_dataset.items), len(train_dataset),
+                                        replacement=True, generator=generator)
+    train_loader = DataLoader(train_dataset, shuffle=sampler is None, sampler=sampler,
+                              drop_last=True, **loader_args)
     val_loader = DataLoader(val_dataset, shuffle=False, drop_last=False, **loader_args)
 
     if len(train_dataset) < loader_args["batch_size"]:
@@ -138,6 +147,9 @@ def main():
     if config["mode"] in UPSTREAM_MODES:
         from gray_cold_diffusion.official_training import OfficialTrainer
         trainer_class = OfficialTrainer
+    if config['data'].get('mixed_domains'):
+        from gray_cold_diffusion.mixed_training import MixedTrainer
+        trainer_class = MixedTrainer
     trainer = trainer_class(model, bridge, train_loader, val_loader, config, device)
 
     if args.resume:
@@ -151,6 +163,8 @@ def main():
             trainer.load_checkpoint(resume_path)
         else:
             print(f"no checkpoint found; starting from step 0: {resume_path}")
+    if config["data"].get("mixed_domains"):
+        trainer.write_diagnostics()
     trainer.train()
 
 

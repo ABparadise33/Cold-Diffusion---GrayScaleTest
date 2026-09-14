@@ -384,3 +384,15 @@ Lab-chroma factors until the fixed preview passes visual inspection.
    but only four fixed comparison/trajectory examples unless requested. Stop
    on checkpoint/config/split mismatches or leakage checks; never silently
    substitute best.pt or an earlier checkpoint. Reassess after this sweep.
+
+## 2026-09-14 — Active: mixed UIEB + DIV2K full-gray pilot
+
+- Question/motivation: Can water-scene references and natural-image targets jointly improve missing-color prediction for underwater imaging?
+- Hypothesis: A mixed natural/water-scene prior helps full-gray colorization; this is unverified and does not establish real underwater restoration.
+- Limitation: User reports weak/cold UIEB Lab output, gray DIV2K Lab validation, and RGB outputs coloring water more than objects. Existing 5%/25% results retain color evidence and do not validate 0% recovery. These are user observations, not newly audited scores.
+- Leverage: Existing official sRGB pipeline, UIEB train/val reference split and DIV2K HR train/val. Sample each domain with probability 0.5; unchanged saturation1, T20 and optimizer recipe.
+- Smallest test/budget: Fresh 10k-step pilot, effective batch32; log exposure every50, validate/checkpoint every1000. No prerequisite debugging run: diagnostics run alongside training as explicitly requested. Current scope is code + GitHub push; GPU launch deferred by user.
+- Evaluation: Existing all-validation center-crop metrics and previews; fixed two images per domain per train/val split at step0 and every validation, target/gray/online-direct/EMA-direct/sampler color statistics and all reverse steps. Fixed-subset diagnostics are not full-domain scores. UIEB raw is not used in this colorization pilot.
+- Failure meaning: Gray direct and sampled output suggests target/endpoint/fit issues; colored direct but gray sampler suggests reverse-update issues; train-only success suggests generalization. These are diagnostic leads, not automatic causal conclusions.
+- Success continuation: If color fidelity improves consistently, repeat seeds and evaluate real raw inputs and fresh held-out data before claiming underwater enhancement.
+- Stop: Stop at10k and inspect logs before extending; no automatic50k run. Treat nonfinite diagnostic states as a failure requiring inspection; preserve artifacts.
