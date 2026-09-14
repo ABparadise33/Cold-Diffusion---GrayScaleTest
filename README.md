@@ -2,8 +2,6 @@
 
 ## 1. 環境建置
 
-Linux NVIDIA GPU（RTX 3090／4090／5090）、Python 3.10–3.12；建置時自動選擇相容的 PyTorch／CUDA。
-
 ```bash
 git clone https://github.com/ABparadise33/Cold-Diffusion---GrayScaleTest.git
 cd Cold-Diffusion---GrayScaleTest
