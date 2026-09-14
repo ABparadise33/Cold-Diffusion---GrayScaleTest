@@ -31,12 +31,12 @@ python_bin="$repo_root/.venv/bin/python"
 "$python_bin" -m pip install --upgrade pip "setuptools<82" wheel
 
 echo "[3/5] PyTorch 2.5.1 + CUDA 12.1"
-if ! "$python_bin" -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)' 2>/dev/null; then
+if ! "$python_bin" -c 'import torch, torchvision; assert torch.__version__.split("+")[0] == "2.5.1"; assert torchvision.__version__.split("+")[0] == "0.20.1"; assert torch.version.cuda == "12.1"; assert torch.cuda.is_available()' 2>/dev/null; then
   "$python_bin" -m pip install --upgrade --force-reinstall \
     "torch==2.5.1" "torchvision==0.20.1" \
     --index-url https://download.pytorch.org/whl/cu121
 else
-  echo "Reusing the CUDA-enabled PyTorch already installed in .venv."
+  echo "Reusing verified PyTorch 2.5.1 / torchvision 0.20.1 / CUDA 12.1 in .venv."
 fi
 
 if ! "$python_bin" -c 'import torchvision; assert torchvision.__version__.startswith("0.20.1")' 2>/dev/null; then

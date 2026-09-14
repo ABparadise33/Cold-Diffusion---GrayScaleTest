@@ -4,7 +4,13 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 python_bin="${MIXED_PYTHON:-$repo_root/.venv/bin/python}"
 div2k_root="${DIV2K_DATA_ROOT:-$repo_root/data/DIV2K}"
-uieb_reference="${UIEB_REFERENCE_DIR:-$repo_root/../Underwater_Dataset/UIEB/reference-890}"
+uieb_root="${UIEB_DATA_ROOT:-$repo_root/data/UIEB}"
+uieb_default="$uieb_root/reference-890"
+# Retain the previous workstation layout when no new-instance dataset is present.
+if [[ ! -d "$uieb_default" && -z "${UIEB_DATA_ROOT:-}" ]]; then
+  uieb_default="$repo_root/../Underwater_Dataset/UIEB/reference-890"
+fi
+uieb_reference="${UIEB_REFERENCE_DIR:-$uieb_default}"
 mixed_root="${MIXED_DATA_ROOT:-$repo_root/data/UIEB_DIV2K}"
 "$python_bin" tools/check_environment.py --require-cuda --min-vram-gb 20
 "$python_bin" tools/prepare_mixed_colorization.py \
