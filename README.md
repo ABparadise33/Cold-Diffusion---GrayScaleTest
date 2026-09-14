@@ -2,7 +2,7 @@
 
 ## 1. 環境建置
 
-Linux NVIDIA GPU（建議 RTX 4090 24GB）、Python 3.10–3.12。
+Linux NVIDIA GPU（RTX 3090／4090／5090）、Python 3.10–3.12；建置時自動選擇相容的 PyTorch／CUDA。
 
 ```bash
 git clone https://github.com/ABparadise33/Cold-Diffusion---GrayScaleTest.git
@@ -14,7 +14,7 @@ apt-get install -y git-lfs python3-venv
 git lfs install
 
 # 建立 .venv、安裝依賴、檢查 CUDA，下載並準備 UIEB + DIV2K
-bash scripts/setup_mixed_4090.sh
+bash scripts/setup_mixed.sh
 ```
 
 ## 2. 訓練
@@ -23,13 +23,13 @@ sRGB、0% 完整灰階、飽和度 1.0，UIEB reference 與 DIV2K HR 以 1：1 �
 預設 10k 步，每 1k 步驗證、儲存 checkpoint 與除錯 log。
 
 ```bash
-bash scripts/train_mixed_uieb_div2k_4090.sh
+bash scripts/train_mixed_uieb_div2k.sh
 ```
 
 中斷後續訓：
 
 ```bash
-bash scripts/train_mixed_uieb_div2k_4090.sh --resume
+bash scripts/train_mixed_uieb_div2k.sh --resume
 ```
 
 輸出：`outputs/uieb_div2k_rgb_fullgray_pilot/`。

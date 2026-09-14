@@ -11,7 +11,7 @@ and makes namespaced symlinks without copying image data.
 
 ## 新 GPU instance：從 git clone 開始
 
-適用於 Linux NVIDIA GPU（4090 24GB 或符合既有 CUDA 環境檢查的機器）。
+適用於 Linux NVIDIA GPU（RTX 3090／4090／5090）。
 使用供應商已安裝 NVIDIA driver 的映像；Python 3.10–3.12，建議至少40GB可用磁碟。
 在持久磁碟的工作目錄開啟終端，先 clone 專案：
 
@@ -34,11 +34,12 @@ git lfs install
 建置環境並準備兩個資料集：
 
 ```bash
-bash scripts/setup_mixed_4090.sh
+bash scripts/setup_mixed.sh
 ```
 
-腳本會建立專案 `.venv`、安裝 PyTorch2.5.1 / torchvision0.20.1（CUDA12.1）
-及專案依賴，執行 CUDA 檢查與測試，再沿用現有 UIEB mirror 下載器、官方 DIV2K
+腳本會建立專案 `.venv`，依GPU選擇配對版本：3090／4090 使用 PyTorch2.5.1 + torchvision0.20.1 + CUDA12.1；5090 使用 PyTorch2.7.1 + torchvision0.22.1 + CUDA12.8。
+版本選擇記錄在 `.venv/gpu_environment.json`；安裝依賴時使用 constraints 防止版本被改回。
+執行 CUDA 前向／反向檢查與測試，再沿用現有 UIEB mirror 下載器、官方 DIV2K
 下載器，建立混合資料。UIEB使用既有 Hugging Face Git LFS mirror；已備妥官方
 reference 的使用者可指定下方 `UIEB_REFERENCE_DIR`，略過 mirror 下載。
 資料預設放在 `data/UIEB`、`data/DIV2K`、`data/UIEB_DIV2K`。
@@ -48,12 +49,11 @@ reference 的使用者可指定下方 `UIEB_REFERENCE_DIR`，略過 mirror 下�
 接著開始訓練：
 
 ```bash
-bash scripts/train_mixed_uieb_div2k_4090.sh
+bash scripts/train_mixed_uieb_div2k.sh
 ```
 
 預設10k步。每次都是新訓練；已有輸出時會停止，續訓需明確加 `--resume`。
-環境建置不會自動開始訓練。較新的、需要其他 PyTorch/CUDA 版本的 GPU
-不屬於這份4090固定環境的保證範圍。
+環境建置不會自動開始訓練。無法辨識的 GPU 會停止並顯示錯誤，不會猜測型號。驅動由 instance 映像提供；CUDA 執行失敗時需先檢查驅動。
 
 ### 已掛載資料的 instance
 
@@ -62,8 +62,8 @@ bash scripts/train_mixed_uieb_div2k_4090.sh
 ```bash
 export UIEB_REFERENCE_DIR=/absolute/path/UIEB/reference-890
 export DIV2K_DATA_ROOT=/absolute/path/DIV2K
-bash scripts/setup_mixed_4090.sh
-bash scripts/train_mixed_uieb_div2k_4090.sh
+bash scripts/setup_mixed.sh
+bash scripts/train_mixed_uieb_div2k.sh
 ```
 
 DIV2K root 必須包含 `DIV2K_train_HR` 與 `DIV2K_valid_HR`。
@@ -110,3 +110,5 @@ All model outputs are under `outputs/uieb_div2k_rgb_fullgray_pilot/`:
 
 Diagnostics do not increase target saturation or alter endpoint sampling/loss.
 Review at10k before a longer run. GPU training was not executed on the Mac.
+
+GPU版本來源：[PyTorch安裝配對](https://pytorch.org/get-started/previous-versions/)、[PyTorch2.7 Blackwell支援](https://pytorch.org/blog/pytorch-2-7/)。三種GPU仍需在各自instance通過CUDA測試，Mac上的測試不代表實體GPU已驗證。

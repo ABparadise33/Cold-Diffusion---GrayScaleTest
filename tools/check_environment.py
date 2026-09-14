@@ -31,6 +31,7 @@ def main() -> None:
     vram_gb = properties.total_memory / 1024**3
     print(f"device: {properties.name}")
     print(f"compute_capability: {properties.major}.{properties.minor}")
+    print(f"compute_capability: {properties.major}.{properties.minor}")
     print(f"vram_gb: {vram_gb:.1f}")
     if vram_gb < args.min_vram_gb:
         raise SystemExit(
@@ -40,6 +41,14 @@ def main() -> None:
     value = torch.ones(256, 256, device="cuda").square().mean()
     torch.cuda.synchronize()
     print(f"cuda_operation: OK ({value.item():.1f})")
+    conv = torch.nn.Conv2d(3, 8, 3, padding=1).cuda()
+    sample = torch.randn(2, 3, 32, 32, device="cuda", requires_grad=True)
+    loss = conv(sample).square().mean()
+    loss.backward()
+    torch.cuda.synchronize()
+    if not torch.isfinite(loss) or not torch.isfinite(sample.grad).all():
+        raise SystemExit("ERROR: nonfinite CUDA convolution forward/backward")
+    print("cuda_conv_backward: OK")
 
 
 if __name__ == "__main__":

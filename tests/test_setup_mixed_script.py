@@ -17,9 +17,9 @@ def test_setup_orders_environment_and_data_without_changing_split(tmp_path, moun
     git = bin_dir/'git'
     git.write_text('#!/bin/sh\nexit 0\n')
     git.chmod(0o755)
-    source = Path(__file__).parents[1]/'scripts/setup_mixed_4090.sh'
-    shutil.copy(source, root/'scripts/setup_mixed_4090.sh')
-    (root/'scripts/setup_cuda_4090.sh').write_text('echo environment >> "$CALL_LOG"\n')
+    source = Path(__file__).parents[1]/'scripts/setup_mixed.sh'
+    shutil.copy(source, root/'scripts/setup_mixed.sh')
+    (root/'scripts/setup_cuda.sh').write_text('echo environment >> "$CALL_LOG"\n')
     python = root/'.venv/bin/python'
     python.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALL_LOG"\n')
     python.chmod(0o755)
@@ -29,7 +29,7 @@ def test_setup_orders_environment_and_data_without_changing_split(tmp_path, moun
         env.pop(key, None)
     if mounted:
         env['UIEB_REFERENCE_DIR'] = '/mounted/UIEB/reference-890'
-    subprocess.run(['bash', str(root/'scripts/setup_mixed_4090.sh')], env=env, check=True, capture_output=True)
+    subprocess.run(['bash', str(root/'scripts/setup_mixed.sh')], env=env, check=True, capture_output=True)
     calls = log.read_text().splitlines()
     assert calls[0] == 'environment'
     assert ('tools/prepare_uieb.py' in '\n'.join(calls)) != mounted

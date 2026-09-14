@@ -8,5 +8,5 @@ PyYAML>=6.0
 scipy>=1.10
 setuptools<82
 torch>=2.2
-torchvision==0.20.1
+torchvision>=0.20.1,<0.23
 pytest>=8.0
