@@ -2,8 +2,6 @@
 
 ## 1. 環境建置
 
-Linux NVIDIA GPU（建議 RTX 4090 24GB）、Python 3.10–3.12。
-
 ```bash
 git clone https://github.com/ABparadise33/Cold-Diffusion---GrayScaleTest.git
 cd Cold-Diffusion---GrayScaleTest
