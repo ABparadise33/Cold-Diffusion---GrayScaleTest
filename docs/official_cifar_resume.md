@@ -1,11 +1,13 @@
 # 官方 CIFAR-10：10k 接續至總共 100k
 
+既有GPU checkout若仍叫 `Cold-Diffusion---GrayScaleTest`，下方 `cd` 請沿用實際舊目錄；repository更名不會自動搬動本機檔案。
+
 ## 訓練
 
 在原本 GPU instance 的外層專案執行，沿用原環境與 CIFAR-10 資料，不需重新 clone 或 setup：
 
 ```bash
-cd /workspace/Cold-Diffusion---GrayScaleTest
+cd /workspace/Cold-Diffusion-in-UIE
 git pull --ff-only
 bash scripts/resume_official_cifar10.sh
 ```
@@ -60,7 +62,7 @@ RGB新增 `rgb_mae`（平均絕對誤差）、`rgb_mse`、`rgb_rmse`，使用sRG
 只有決定續訓後，才執行以下指令（會開始訓練）：
 
 ```bash
-cd /workspace/Cold-Diffusion---GrayScaleTest
+cd /workspace/Cold-Diffusion-in-UIE
 git pull --ff-only
 CIFAR_TRAIN_STEPS=120000 bash scripts/resume_official_cifar10.sh
 ```
@@ -72,7 +74,7 @@ CIFAR_TRAIN_STEPS=120000 bash scripts/resume_official_cifar10.sh
 100k已完成後不用再訓練，於外層專案執行：
 
 ```bash
-cd /workspace/Cold-Diffusion---GrayScaleTest
+cd /workspace/Cold-Diffusion-in-UIE
 git pull --ff-only
 bash scripts/evaluate_official_cifar10.sh
 ```

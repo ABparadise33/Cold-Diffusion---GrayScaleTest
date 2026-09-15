@@ -1,10 +1,10 @@
-# Cold Diffusion — UIEB + DIV2K
+# Cold Diffusion in UIE
 
 ## 1. 環境建置
 
 ```bash
-git clone https://github.com/ABparadise33/Cold-Diffusion---GrayScaleTest.git
-cd Cold-Diffusion---GrayScaleTest
+git clone https://github.com/ABparadise33/Cold-Diffusion-in-UIE.git
+cd Cold-Diffusion-in-UIE
 
 # Ubuntu/Debian；非 root 帳號請在 apt-get 前加 sudo
 apt-get update

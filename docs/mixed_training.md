@@ -16,8 +16,8 @@ and makes namespaced symlinks without copying image data.
 在持久磁碟的工作目錄開啟終端，先 clone 專案：
 
 ```bash
-git clone https://github.com/ABparadise33/Cold-Diffusion---GrayScaleTest.git
-cd Cold-Diffusion---GrayScaleTest
+git clone https://github.com/ABparadise33/Cold-Diffusion-in-UIE.git
+cd Cold-Diffusion-in-UIE
 ```
 
 Ubuntu/Debian instance 若尚未安裝 Git LFS / venv，執行：
