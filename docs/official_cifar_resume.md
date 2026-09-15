@@ -25,9 +25,11 @@ bash scripts/resume_official_cifar10.sh
 
 每1k預覽另外寫入同一結果資料夾：
 
-- `preview_color_metrics.csv`：每個step各有xt/direct_recons/recon三列，方便畫曲線。
+- `preview_color_metrics_v2.csv`：每個step各有xt/direct_recons/recon三列，方便畫曲線。
 - `preview_color_metrics.jsonl`：每張圖片的指標、原圖tensor SHA256、時間及預覽編號，對應 `sample-*-<編號>.png`。
 - 終端log中的 `PREVIEW_COLOR`：三種輸出的平均ΔE76摘要。
+
+RGB新增 `rgb_mae`（平均絕對誤差）、`rgb_mse`、`rgb_rmse`，使用sRGB [0,1]通道值，越低越好；這些是通道誤差，不是感知色差。V2 CSV獨立建立，保留舊CSV；JSONL以schema_version區分。
 
 相對於同一批og計算：`delta_e76`是Lab D65整體色差（包含亮度），`ab_error`是只比較a/b色彩的距離，兩者越低越好；`chroma`與`target_chroma`是輸出/目標彩度，接近目標只代表彩度接近，不代表色相正確。`delta_e76_gain_vs_gray`是灰階色差減去輸出色差，正值代表比不補色改善。另記錄超出RGB範圍的通道比例 `clipped_fraction`；色差使用與顯示一致的裁切範圍，在PNG量化前計算。
 
@@ -37,22 +39,32 @@ bash scripts/resume_official_cifar10.sh
 
 ## Evaluate
 
-沿用先前已修正且成功執行的官方 `test.py`（CIFAR使用torchvision test split），以EMA評估100k：
+100k已完成後不用再訓練，於外層專案執行：
 
 ```bash
-cd /workspace/Cold-Diffusion---GrayScaleTest/data/official_cold_diffusion/decolor-diffusion
-CIFAR_PYTHON=/workspace/Cold-Diffusion---GrayScaleTest/.venv/bin/python
-mkdir -p logs
-set -o pipefail
-CIFAR_INFERENCE_ONLY=1 "$CIFAR_PYTHON" -u test.py \
-  --dataset cifar10 --dataset_folder ./data --model UnetConvNext \
-  --forward_process_type Decolorization --decolor_routine Linear \
-  --decolor_total_remove --time_steps 20 --sample_steps 20 \
-  --train_routine Final --sampling_routine x0_step_down \
-  --save_folder_train ./results --save_folder_test ./evaluation \
-  --exp_name cifar10_rgb_fullgray_100k --load_model_steps 100000 \
-  --test_type test_data --order_seed 42 --test_postfix step100000 \
-  2>&1 | tee logs/cifar10_eval_100k.log
+cd /workspace/Cold-Diffusion---GrayScaleTest
+git pull --ff-only
+bash scripts/evaluate_official_cifar10.sh
 ```
 
-`CIFAR_INFERENCE_ONLY=1`只載入模型與EMA，避免以測試batch等設定檢查訓練續接狀態。50k比較改用 `--load_model_steps 50000`，並將postfix/log改為50k。使用相同測試集、順序seed及取樣設定對比10k/50k/100k；訓練預覽本身不是驗證集結果。
+預設使用官方 `results/cifar10_rgb_fullgray_100k/model_100000.pt` 的EMA，固定seed42、CIFAR-10 **test split全部10,000張**、按資料索引排序、batch32、32px、sRGB、Linear完整去色、T20及官方x0_step_down sampler。沿用原有環境與已下載的CIFAR資料，不需重建環境。末批16張也會評分。
+
+輸出在官方程式目錄 `data/official_cold_diffusion/decolor-diffusion/evaluation/cifar10_test_step100000/`：
+
+- `summary.json`：全測試集xt/direct_recons/recon的RGB與Lab平均誤差、相對灰階改善量；正改善量代表優於灰階。
+- `preview_color_metrics_v2.csv` / `preview_color_metrics.jsonl`：逐批／逐圖指標、test split標記、資料索引、目標hash。RGB RMSE摘要是逐圖RMSE的平均。
+- `og.png` / `xt.png` / `direct_recons.png` / `recon.png`：同一批固定前32張的四種預覽；分數使用全部10,000張。
+- `evaluation_config.json`：checkpoint hash、step、設定、程式hash、環境；`sampler.log`保存官方取樣訊息。外層 `logs/cifar10_evaluate_<時間>.log`保存進度及摘要。
+
+新腳本直接呼叫官方模型與sampler，不依賴官方 `test.py` 的手動CIFAR修改。該版本 `test_from_data()` 在第一批存圖後就return，舊test命令只能用於預覽，不能宣稱完整test評分。
+
+比較10k時指定舊checkpoint（仍用相同test資料和排序）：
+
+```bash
+bash scripts/evaluate_official_cifar10.sh \
+  --checkpoint data/official_cold_diffusion/decolor-diffusion/results/cifar10_rgb_fullgray_10k/model_10000.pt
+```
+
+50k改指向 `results/cifar10_rgb_fullgray_100k/model_50000.pt`。每個step有獨立輸出目錄；重跑同一步請加 `--output-dir <新目錄>`，避免覆寫已完成結果。可用 `--limit 32 --output-dir <新目錄>`檢查流程，但只會標記為test_subset，不能代表完整測試結果。
+
+訓練每1k的新RGB紀錄需要下次啟動訓練時才會生效，已結束的100k訓練不會補寫歷史數值；本次完整評測可立即計算100k的RGB/Lab誤差。

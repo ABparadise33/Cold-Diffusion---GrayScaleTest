@@ -134,20 +134,26 @@ def log_preview_color(trainer, samples):
     target_chroma = np.linalg.norm(target[..., 1:], axis=-1).mean(axis=(1, 2))
     hashes = [hashlib.sha256(x.detach().cpu().float().contiguous().numpy().tobytes()).hexdigest()
               for x in samples['og']]
-    event = {'schema_version': 1, 'step': int(trainer.step),
+    event = {'schema_version': 2, 'step': int(trainer.step),
              'utc': datetime.now(timezone.utc).isoformat(),
-             'split': 'train_preview', 'weights': 'ema',
+             'split': getattr(trainer, 'metric_split', 'train_preview'), 'weights': 'ema',
              'preview_index': int(trainer.step // trainer.save_and_sample_every),
              'batch_size': len(target), 'target_tensor_sha256': hashes,
              'metric': 'CIE76, Lab D65, display-clipped sRGB before PNG quantization',
-             'comparison': 'same batch within step; preview batch changes across steps',
-             'phases': {}}
+             'comparison': 'paired against og; match dataset indices or target hashes across runs',
+             'phases': {}, 'dataset_indices': getattr(trainer, 'metric_indices', None)}
     for name in ['xt', 'direct_recons', 'recon']:
         lab, clipped_fraction = _preview_lab(samples[name])
         if lab.shape != target.shape:
             raise ValueError(f'{name} and target preview shapes differ')
         delta = lab - target
+        rgb = ((samples[name].detach().cpu().double().numpy() + 1) * .5).clip(0, 1)
+        og_rgb = ((samples['og'].detach().cpu().double().numpy() + 1) * .5).clip(0, 1)
+        rgb_delta = rgb - og_rgb
         values = {
+            'rgb_mae': np.abs(rgb_delta).mean(axis=(1, 2, 3)),
+            'rgb_mse': np.square(rgb_delta).mean(axis=(1, 2, 3)),
+            'rgb_rmse': np.sqrt(np.square(rgb_delta).mean(axis=(1, 2, 3))),
             'delta_e76': np.linalg.norm(delta, axis=-1).mean(axis=(1, 2)),
             'ab_error': np.linalg.norm(delta[..., 1:], axis=-1).mean(axis=(1, 2)),
             'chroma': np.linalg.norm(lab[..., 1:], axis=-1).mean(axis=(1, 2)),
@@ -163,9 +169,10 @@ def log_preview_color(trainer, samples):
     folder.mkdir(parents=True, exist_ok=True)
     with (folder/'preview_color_metrics.jsonl').open('a') as handle:
         handle.write(json.dumps(event, allow_nan=False) + '\n')
-    csv_path = folder/'preview_color_metrics.csv'
+    # V2 adds RGB columns; keep pre-existing V1 CSV intact on upgrade.
+    csv_path = folder/'preview_color_metrics_v2.csv'
     header = ['step', 'utc', 'preview_index', 'split', 'weights', 'batch_size', 'phase',
-              'delta_e76', 'ab_error', 'chroma', 'target_chroma', 'clipped_fraction', 'delta_e76_gain_vs_gray']
+              'rgb_mae', 'rgb_mse', 'rgb_rmse', 'delta_e76', 'ab_error', 'chroma', 'target_chroma', 'clipped_fraction', 'delta_e76_gain_vs_gray']
     needs_header = not csv_path.exists() or csv_path.stat().st_size == 0
     with csv_path.open('a', newline='') as handle:
         writer = csv.DictWriter(handle, fieldnames=header)
@@ -178,4 +185,6 @@ def log_preview_color(trainer, samples):
             writer.writerow(row)
     print('PREVIEW_COLOR:', json.dumps({'step': event['step'],
           'delta_e76': {k: v['mean']['delta_e76'] for k, v in event['phases'].items()},
-          'note': 'train preview; lower is better; batch varies across steps'}, allow_nan=False))
+          'rgb_mae': {k: v['mean']['rgb_mae'] for k, v in event['phases'].items()},
+          'split': event['split']}, allow_nan=False))
+    return event

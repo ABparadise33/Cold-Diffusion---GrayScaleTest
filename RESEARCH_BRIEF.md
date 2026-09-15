@@ -413,3 +413,9 @@ Lab-chroma factors until the fixed preview passes visual inspection.
 - Evaluation: Compare fixed held-out inputs at10k/50k/100k with unchanged sampling, target/gray/output and chroma fidelity. Training previews alone do not establish generalization.
 - Failure meaning: Still-gray100k narrows evidence to this budget/setup, not proof of an implementation bug or impossibility; inspect learning/color trajectories before further scaling.
 - Stop/continuation: Stop at100k to review. Improved color supports another bounded baseline test before underwater transfer; no automatic700k extension.
+
+## 2026-09-15 — Evaluate completed CIFAR100k
+
+- User reports100k complete and provides two training preview grids. Test generalization on all10,000 held-out CIFAR10 images, fixed index order, EMA,32px/full-gray/T20; no additional training authorized by this evaluation step.
+- Correct limitation: official test_from_data returns after first batch, so prior preview commands were not full-test metrics. New wrapper calls the unchanged official sampler across the entire test split, includes the short last batch, and records per-image identities.
+- Evidence/stop: RGB MAE/MSE/RMSE and CIE76/ab/chroma versus paired ground truth, gray baseline, Direct and final sample. Budget one full evaluation/checkpoint, retain hashes and fixed first-batch grids. Compare10k and100k before any larger training budget; training previews alone cannot establish generalization.

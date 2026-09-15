@@ -186,7 +186,7 @@ def test_preview_metrics_append_identity_and_rng(tmp_path):
     assert event['phases']['xt']['mean']['chroma'] < .001
     assert len(event['phases']['xt']['per_image']) == 2
     assert event['target_tensor_sha256'] == events[1]['target_tensor_sha256']
-    with (tmp_path/'preview_color_metrics.csv').open() as handle:
+    with (tmp_path/'preview_color_metrics_v2.csv').open() as handle:
         rows = list(csv.DictReader(handle))
     assert len(rows) == 6
     assert float(rows[2]['delta_e76_gain_vs_gray']) > 0
@@ -199,3 +199,82 @@ def test_preview_clipping_and_invalid_input():
     assert fraction.tolist() == [1.]
     with pytest.raises(ValueError, match='finite'):
         support._preview_lab(torch.full((1, 3, 1, 1), float('nan')))
+
+
+def test_rgb_metrics_scale(tmp_path):
+    t = trainer(tmp_path)
+    t.save_and_sample_every = 1000
+    black = torch.full((1, 3, 2, 2), -1.)
+    white = torch.ones_like(black)
+    event = support.log_preview_color(t, {'og': black, 'xt': white, 'direct_recons': black, 'recon': white})
+    for metric in ['rgb_mae', 'rgb_mse', 'rgb_rmse']:
+        assert event['phases']['xt']['mean'][metric] == 1.
+        assert event['phases']['direct_recons']['mean'][metric] == 0.
+
+
+def test_evaluation_summary_weights_short_final_batch(monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, 'official_cifar_resume_support', support)
+    evaluator = load_tool('evaluate_official_cifar10')
+    def event(n, gray, result):
+        return {'batch_size': n, 'phases': {
+            'xt': {'mean': {'delta_e76': gray, 'rgb_mae': gray/100}},
+            'recon': {'mean': {'delta_e76': result, 'rgb_mae': result/100}},
+        }}
+    summary = evaluator.summarize([event(32, 10, 5), event(16, 40, 20)])
+    assert summary['count'] == 48
+    assert summary['phases']['xt']['delta_e76'] == 20
+    assert summary['phases']['recon']['delta_e76'] == 10
+    assert summary['phases']['recon']['delta_e76_gain_vs_gray'] == 10
+    assert summary['phases']['recon']['rgb_mae_gain_vs_gray'] == pytest.approx(.1)
+
+
+def test_evaluator_runs_all_batches_and_saves_summary(tmp_path, monkeypatch):
+    import json
+    import sys
+    monkeypatch.setitem(sys.modules, 'official_cifar_resume_support', support)
+    evaluator = load_tool('evaluate_official_cifar10')
+    root = tmp_path/'official'
+    (root/'diffusion').mkdir(parents=True)
+    (root/'diffusion/diffusion.py').write_text('# test double')
+    checkpoint = tmp_path/'model_100000.pt'
+    torch.save({'step':100000, 'ema': {}}, checkpoint)
+    monkeypatch.setattr(evaluator.subprocess, 'check_output', lambda *a, **k: evaluator.PIN)
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
+    monkeypatch.setattr(torch.cuda, 'manual_seed_all', lambda seed: None)
+    monkeypatch.setattr(torch.cuda, 'get_device_name', lambda: 'synthetic test')
+    monkeypatch.setattr(torch.Tensor, 'cuda', lambda self: self)
+    batches = []
+    class Model(torch.nn.Module):
+        def __init__(self, *a, **k):
+            super().__init__()
+        def cuda(self):
+            return self
+        def sample(self, batch_size, img, t):
+            batches.append(batch_size)
+            gray = img.mean(1, keepdim=True).expand_as(img)
+            return {'xt': gray, 'direct_recons': img.clone(), 'recon': img.clone()}
+    class Dataset:
+        def __init__(self, root, train, download, transform):
+            assert train is False and download is False
+        def __len__(self):
+            return 10000
+        def __getitem__(self, i):
+            return torch.tensor([1., -1., -1.]).reshape(3, 1, 1).expand(3, 2, 2).clone(), 0
+    monkeypatch.setitem(sys.modules, 'diffusion', SimpleNamespace(GaussianDiffusion=Model))
+    monkeypatch.setitem(sys.modules, 'diffusion.model.get_model', SimpleNamespace(get_model=lambda *a, **k: Model()))
+    transforms = SimpleNamespace(Compose=lambda x: x, ToTensor=lambda: None, Normalize=lambda *a: None)
+    monkeypatch.setitem(sys.modules, 'torchvision', SimpleNamespace(datasets=SimpleNamespace(CIFAR10=Dataset), transforms=transforms))
+    monkeypatch.setitem(sys.modules, 'torchvision.utils', SimpleNamespace(save_image=lambda tensor, path, nrow: Path(path).write_bytes(b'test')))
+    output = tmp_path/'evaluation'
+    monkeypatch.setattr(sys, 'argv', ['evaluate', '--official-dir', str(root), '--checkpoint', str(checkpoint),
+                                    '--output-dir', str(output), '--limit', '33'])
+    evaluator.main()
+    summary = json.loads((output/'summary.json').read_text())
+    assert batches == [32, 1]
+    assert summary['count'] == 33 and summary['full_test'] is False
+    assert summary['phases']['recon']['rgb_mae'] == 0
+    records = [json.loads(x) for x in (output/'preview_color_metrics.jsonl').read_text().splitlines()]
+    assert records[-1]['dataset_indices'] == [32]
+    assert records[0]['split'] == 'test_subset'
+    assert all((output/f'{phase}.png').exists() for phase in ['og', 'xt', 'direct_recons', 'recon'])
