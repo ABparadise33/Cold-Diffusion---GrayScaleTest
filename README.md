@@ -32,6 +32,12 @@ bash scripts/train_mixed_uieb_div2k.sh --resume
 
 輸出：`outputs/uieb_div2k_rgb_fullgray_pilot/`。
 
+既有官方 CIFAR-10 10k 實驗續訓至總共100k（[步驟](docs/official_cifar_resume.md)）：
+
+```bash
+bash scripts/resume_official_cifar10.sh
+```
+
 ## 3. Evaluate
 
 使用混合訓練的最佳 checkpoint，在 UIEB Test90 上從 raw 的完整灰階版本反推：

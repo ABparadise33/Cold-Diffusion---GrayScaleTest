@@ -403,3 +403,13 @@ Lab-chroma factors until the fixed preview passes visual inspection.
 - Hypothesis/test: On the same trained checkpoint, fixed seed42 DIV2K train and val subsets (8 each), synthesize full gray from each original and compare online/EMA Direct and Algorithm2. Full-image first, only CUDA OOM permits logged fallback; no retraining. Target/source hashes and checkpoint identity fixed across all four comparisons.
 - Evaluation: Preserve geometry, compare target/gray/direct/sample visually and via per-image Delta-E76 and chroma; record all reverse steps and actual spatial route. Train-only success points toward generalization; neither split improving points toward fit/endpoint/representation. Colored Direct but gray sample motivates sampler inspection. None proves a mechanism by itself.
 - Budget/stop: Inference only on32 model-image combinations (16 images ×2 weight types). Stop to inspect diagnostic evidence before any15k continuation. Current local scope is implementation/synthetic verification; real checkpoint and DIV2K source data are on the user's GPU instance.
+
+## 2026-09-15 — Official CIFAR-10 continuation to 100k
+
+- Question: Does the reported gray output at10k reflect insufficient optimization, before attributing failure to underwater transfer? This baseline matters for judging the colorization mechanism.
+- Hypothesis: More training improves fixed held-out CIFAR color fidelity; user reports an official700k result, but that does not establish the earliest successful step.
+- Leverage/limitation: Continue existing official T20 sRGB full-gray ConvNeXt weights. Legacy10k lacks optimizer/RNG, so first migration restarts Adam; this is not an uninterrupted100k reproduction. New checkpoints preserve optimizer/RNG; DataLoader order is not exactly replayed.
+- Test/budget: User authorizes total100k (90k additional), latest checkpoint every1k and retained milestones every10k. No new GPU run launched locally.
+- Evaluation: Compare fixed held-out inputs at10k/50k/100k with unchanged sampling, target/gray/output and chroma fidelity. Training previews alone do not establish generalization.
+- Failure meaning: Still-gray100k narrows evidence to this budget/setup, not proof of an implementation bug or impossibility; inspect learning/color trajectories before further scaling.
+- Stop/continuation: Stop at100k to review. Improved color supports another bounded baseline test before underwater transfer; no automatic700k extension.
