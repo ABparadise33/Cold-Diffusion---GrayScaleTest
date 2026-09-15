@@ -23,6 +23,18 @@ bash scripts/resume_official_cifar10.sh
 
 模型、損失、T20、Linear完整去色、sRGB、官方batch32×累積2、學習率2e-5和EMA設定延續原方案。存檔步數改為已完成的optimizer更新數；EMA仍沿用官方更新時機。
 
+每1k預覽另外寫入同一結果資料夾：
+
+- `preview_color_metrics.csv`：每個step各有xt/direct_recons/recon三列，方便畫曲線。
+- `preview_color_metrics.jsonl`：每張圖片的指標、原圖tensor SHA256、時間及預覽編號，對應 `sample-*-<編號>.png`。
+- 終端log中的 `PREVIEW_COLOR`：三種輸出的平均ΔE76摘要。
+
+相對於同一批og計算：`delta_e76`是Lab D65整體色差（包含亮度），`ab_error`是只比較a/b色彩的距離，兩者越低越好；`chroma`與`target_chroma`是輸出/目標彩度，接近目標只代表彩度接近，不代表色相正確。`delta_e76_gain_vs_gray`是灰階色差減去輸出色差，正值代表比不補色改善。另記錄超出RGB範圍的通道比例 `clipped_fraction`；色差使用與顯示一致的裁切範圍，在PNG量化前計算。
+
+這些是當次訓練預覽的批次平均及逐圖數值，不是固定驗證集；各step圖片可能不同。使用同一步的gray基準比較，跨step需觀察多次趨勢並以固定測試集確認。只增加記錄，不額外取樣或更動loss/模型。既有圖片不自動回填指標。
+
+更新程式需在目前訓練程序停止後，於外層 `git pull --ff-only` 再執行相同續訓指令；已執行中的Python不會即時套用更新，不要同時啟動第二份訓練。新記錄從下一個1k預覽開始。
+
 ## Evaluate
 
 沿用先前已修正且成功執行的官方 `test.py`（CIFAR使用torchvision test split），以EMA評估100k：

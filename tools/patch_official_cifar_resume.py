@@ -45,6 +45,17 @@ def patch(root):
             raise FileExistsError(f'backup already exists: {backup}')
         shutil.copy2(source, backup)
         source.write_text(updated)
+    # Upgrade both fresh upstream and already V1-patched GPU checkouts.
+    text = source.read_text()
+    color_marker = '# CODEX_CIFAR_PREVIEW_COLOR_V1'
+    if color_marker not in text:
+        needle = "                    sample_dict['og'] = og_img"
+        if text.count(needle) != 1:
+            raise ValueError('Cannot locate the unique official training preview hook')
+        text = text.replace(needle, needle + '\n                    _cifar_log_color(self, sample_dict)')
+        text = color_marker + '\nfrom codex_cifar_resume import log_preview_color as _cifar_log_color\n' + text
+        ast.parse(text)
+        source.write_text(text)
     # The preceding pilot instructions may have supplied explicit 1k cadence.
     # Preserve other Trainer arguments; set checkpoint milestones to10k to bound disk use.
     tree = ast.parse(training)
@@ -74,7 +85,7 @@ def patch(root):
     training = training.replace('trainer.train()\ntrainer.save()\ntrainer.save(save_with_time_stamp=True)', 'trainer.train()')
     train_path.write_text(training)
     shutil.copy2(support, root/'codex_cifar_resume.py')
-    metadata = {'version':1,'changes':['checkpoint optimizer/RNG', 'completed update counters after EMA', 'final save', '1k latest/preview and10k milestones'],
+    metadata = {'version':1,'changes':['checkpoint optimizer/RNG', 'completed update counters after EMA', 'final save', '1k latest/preview and10k milestones', 'per-preview CIE76/ab/chroma logs'],
                 'data_loader': 'new iterator on resume, not bitwise data-order replay',
                 'sha256':{str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in [source,train_path,root/'codex_cifar_resume.py']}}
     (root/'cifar_resume_patch.json').write_text(json.dumps(metadata,indent=2))

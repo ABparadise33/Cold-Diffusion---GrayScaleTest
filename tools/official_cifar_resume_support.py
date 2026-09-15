@@ -103,3 +103,79 @@ def load_checkpoint(trainer, load_path):
     with (folder/'resume_log.jsonl').open('a') as handle:
         handle.write(json.dumps(event) + '\n')
     print('RESUME:', json.dumps(event))
+
+
+def _preview_lab(value):
+    """Display-clipped sRGB [-1,1] BCHW to CIE Lab, D65 (CPU float64)."""
+    rgb = value.detach().cpu().double().numpy()
+    if rgb.ndim != 4 or rgb.shape[1] != 3 or not np.isfinite(rgb).all():
+        raise ValueError('Expected finite BCHW sRGB preview tensors with 3 channels')
+    clipped_fraction = ((rgb < -1) | (rgb > 1)).mean(axis=(1, 2, 3))
+    rgb = ((rgb + 1) * .5).clip(0, 1).transpose(0, 2, 3, 1)
+    linear = np.where(rgb > .04045, ((rgb + .055) / 1.055)**2.4, rgb / 12.92)
+    matrix = np.array([[.4124564, .3575761, .1804375],
+                       [.2126729, .7151522, .0721750],
+                       [.0193339, .1191920, .9503041]])
+    xyz = (linear @ matrix.T) / np.array([.95047, 1., 1.08883])
+    delta = 6 / 29
+    f = np.where(xyz > delta**3, np.cbrt(xyz), xyz / (3 * delta**2) + 4 / 29)
+    lab = np.stack([116*f[..., 1]-16, 500*(f[..., 0]-f[..., 1]),
+                    200*(f[..., 1]-f[..., 2])], axis=-1)
+    return lab, clipped_fraction
+
+
+def log_preview_color(trainer, samples):
+    """Measure existing previews only: no extra sampling or RNG consumption."""
+    import csv
+    import hashlib
+    from datetime import datetime, timezone
+
+    target, _ = _preview_lab(samples['og'])
+    target_chroma = np.linalg.norm(target[..., 1:], axis=-1).mean(axis=(1, 2))
+    hashes = [hashlib.sha256(x.detach().cpu().float().contiguous().numpy().tobytes()).hexdigest()
+              for x in samples['og']]
+    event = {'schema_version': 1, 'step': int(trainer.step),
+             'utc': datetime.now(timezone.utc).isoformat(),
+             'split': 'train_preview', 'weights': 'ema',
+             'preview_index': int(trainer.step // trainer.save_and_sample_every),
+             'batch_size': len(target), 'target_tensor_sha256': hashes,
+             'metric': 'CIE76, Lab D65, display-clipped sRGB before PNG quantization',
+             'comparison': 'same batch within step; preview batch changes across steps',
+             'phases': {}}
+    for name in ['xt', 'direct_recons', 'recon']:
+        lab, clipped_fraction = _preview_lab(samples[name])
+        if lab.shape != target.shape:
+            raise ValueError(f'{name} and target preview shapes differ')
+        delta = lab - target
+        values = {
+            'delta_e76': np.linalg.norm(delta, axis=-1).mean(axis=(1, 2)),
+            'ab_error': np.linalg.norm(delta[..., 1:], axis=-1).mean(axis=(1, 2)),
+            'chroma': np.linalg.norm(lab[..., 1:], axis=-1).mean(axis=(1, 2)),
+            'target_chroma': target_chroma,
+            'clipped_fraction': clipped_fraction,
+        }
+        event['phases'][name] = {
+            'mean': {k: float(v.mean()) for k, v in values.items()},
+            'per_image': [{k: float(v[i]) for k, v in values.items()} for i in range(len(target))],
+        }
+    baseline = event['phases']['xt']['mean']['delta_e76']
+    folder = Path(trainer.results_folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    with (folder/'preview_color_metrics.jsonl').open('a') as handle:
+        handle.write(json.dumps(event, allow_nan=False) + '\n')
+    csv_path = folder/'preview_color_metrics.csv'
+    header = ['step', 'utc', 'preview_index', 'split', 'weights', 'batch_size', 'phase',
+              'delta_e76', 'ab_error', 'chroma', 'target_chroma', 'clipped_fraction', 'delta_e76_gain_vs_gray']
+    needs_header = not csv_path.exists() or csv_path.stat().st_size == 0
+    with csv_path.open('a', newline='') as handle:
+        writer = csv.DictWriter(handle, fieldnames=header)
+        if needs_header:
+            writer.writeheader()
+        for phase, metrics in event['phases'].items():
+            row = {k: event[k] for k in header[:6]}
+            row.update(phase=phase, **metrics['mean'],
+                       delta_e76_gain_vs_gray=baseline-metrics['mean']['delta_e76'])
+            writer.writerow(row)
+    print('PREVIEW_COLOR:', json.dumps({'step': event['step'],
+          'delta_e76': {k: v['mean']['delta_e76'] for k, v in event['phases'].items()},
+          'note': 'train preview; lower is better; batch varies across steps'}, allow_nan=False))

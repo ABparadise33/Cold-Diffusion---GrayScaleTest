@@ -117,6 +117,10 @@ def test_patcher_completed_update_count_and_idempotence(tmp_path):
             if self.step % self.update_ema_every == 0:
                 self.step_ema()
             if self.step != 0 and self.step % self.save_and_sample_every == 0:
+                if True:
+                    sample_dict = {}
+                    og_img = None
+                    sample_dict['og'] = og_img
                 self.save()
             self.step += 1
         print('training completed')
@@ -135,8 +139,8 @@ trainer.save(save_with_time_stamp=True)
     first = source.read_text()
     patcher.patch(tmp_path)
     assert source.read_text() == first
-    namespace = {}
-    exec('\n'.join(first.splitlines()[2:]), namespace)
+    namespace = {'_cifar_log_color': lambda *args: None}
+    exec('\n'.join(x for x in first.splitlines() if not x.startswith('from codex_cifar_resume')), namespace)
     t = namespace['Trainer']()
     t.step, t.train_num_steps = 10000, 10003
     t.update_ema_every, t.save_and_sample_every = 10, 1
@@ -149,3 +153,49 @@ trainer.save(save_with_time_stamp=True)
     assert saved == [(10001,1), (10002,2), (10003,3), (10003,3), (10003,3)]
     assert ema == [10000]
     assert 'save_with_time_stamp_every=10000' in (tmp_path/'train.py').read_text()
+
+
+def test_preview_color_reference_values():
+    black, _ = support._preview_lab(torch.full((1, 3, 2, 2), -1.))
+    white, _ = support._preview_lab(torch.ones(1, 3, 2, 2))
+    assert np.linalg.norm(white-black, axis=-1).mean() == pytest.approx(100, abs=1e-4)
+    red, _ = support._preview_lab(torch.tensor([1., -1., -1.]).reshape(1, 3, 1, 1))
+    np.testing.assert_allclose(red.flatten(), [53.2408, 80.0925, 67.2032], atol=.001)
+
+
+def test_preview_metrics_append_identity_and_rng(tmp_path):
+    import csv
+    import json
+    t = trainer(tmp_path)
+    t.save_and_sample_every = 1000
+    original = torch.tensor([1., -1., -1.]).reshape(1, 3, 1, 1).expand(2, 3, 4, 4).clone()
+    gray = original.mean(1, keepdim=True).expand_as(original)
+    samples = {'og': original, 'xt': gray, 'direct_recons': original, 'recon': original}
+    before = original.clone()
+    rng = torch.get_rng_state().clone()
+    support.log_preview_color(t, samples)
+    t.step += 1000
+    support.log_preview_color(t, samples)
+    assert torch.equal(before, original)
+    assert torch.equal(rng, torch.get_rng_state())
+    events = [json.loads(x) for x in (tmp_path/'preview_color_metrics.jsonl').read_text().splitlines()]
+    assert [e['step'] for e in events] == [10000, 11000]
+    event = events[0]
+    assert event['phases']['recon']['mean']['delta_e76'] == 0
+    assert event['phases']['xt']['mean']['delta_e76'] > 50
+    assert event['phases']['xt']['mean']['chroma'] < .001
+    assert len(event['phases']['xt']['per_image']) == 2
+    assert event['target_tensor_sha256'] == events[1]['target_tensor_sha256']
+    with (tmp_path/'preview_color_metrics.csv').open() as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 6
+    assert float(rows[2]['delta_e76_gain_vs_gray']) > 0
+
+
+def test_preview_clipping_and_invalid_input():
+    lab, fraction = support._preview_lab(torch.full((1, 3, 1, 1), 2.))
+    white, _ = support._preview_lab(torch.ones(1, 3, 1, 1))
+    np.testing.assert_array_equal(lab, white)
+    assert fraction.tolist() == [1.]
+    with pytest.raises(ValueError, match='finite'):
+        support._preview_lab(torch.full((1, 3, 1, 1), float('nan')))
