@@ -43,8 +43,16 @@ bash scripts/train_mixed_uieb_div2k.sh --resume
   --reference-dir data/UIEB/reference-890 \
   --split-file splits/uieb_seed42.json --split test \
   --device cuda --original-size --batch-size 1 \
-  --tile-size 256 --tile-overlap 32 --sampler paper_algorithm2 \
+  --sampler paper_algorithm2 \
   --preview-count 4 --preview-max-side 512 \
   --extended-metrics --extended-metric-size 256 \
   --output-layout compact --output-dir evaluation/uieb_div2k_test90
+```
+
+預設整張推論，僅 CUDA OOM 時改用切塊並記錄。完全禁止切塊可加 `--oom-tile-size 0`。
+
+檢查自然影像補色（固定各8張 DIV2K train／val，對照目前權重與 EMA 的 Direct／反推）：
+
+```bash
+bash scripts/diagnose_natural_fullgray.sh
 ```

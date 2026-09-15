@@ -112,3 +112,33 @@ Diagnostics do not increase target saturation or alter endpoint sampling/loss.
 Review at10k before a longer run. GPU training was not executed on the Mac.
 
 GPU版本來源：[PyTorch安裝配對](https://pytorch.org/get-started/previous-versions/)、[PyTorch2.7 Blackwell支援](https://pytorch.org/blog/pytorch-2-7/)。三種GPU仍需在各自instance通過CUDA測試，Mac上的測試不代表實體GPU已驗證。
+
+## 2026-09-15：整張推論與自然影像診斷
+
+使用者的固定checkpoint對照確認tile造成方正色區。現在Evaluate與訓練的完整場景
+preview均先整張推論；只有CUDA OOM才重新從原始輸入跑完整的tile反推。
+`--tile-size`仍可用來明確重做歷史對照；`--oom-tile-size 0`則禁止fallback。
+Evaluate預設OOM備援512/64，訓練preview沿用config的tile大小作為OOM備援。
+非OOM錯誤不會被當成顯存問題吞掉；備援若仍失敗，會停止。
+每張圖的實際路徑記錄在`其餘/inference_routes.jsonl`及metrics；preview記錄在preview.json。
+舊checkpoint可繼續Evaluate；已知的前版preview fingerprint可安全續訓，其他訓練來源差異仍會拒絕。
+
+```bash
+bash scripts/diagnose_natural_fullgray.sh
+```
+
+預設同一個混合訓練best.pt、固定seed42、DIV2K train/val各8張完整圖片，分別用
+`model`（目前訓練權重）和`ema`執行Direct與paper Algorithm2。輸入只由該自然圖片
+轉完整灰階而得；target是原彩色圖片。這是自然影像補色診斷，不是水下增強分數。
+可用`MIXED_CHECKPOINT`指定權重、`DIV2K_DATA_ROOT`指定資料根目錄，或加`--count 16`。
+不啟動訓練，不增加飽和度，不使用局部彩色提示。
+
+輸出在新建的`evaluation/natural_fullgray_XXXXXX/`：
+- `source_manifest.json`：固定選圖、source/checkpoint SHA256、完成狀態。
+- `train|val/model|ema/`：Direct、反推圖片、比較圖與每一步trajectory。
+- `其餘/color_diagnostics.json`：逐圖target/gray/direct/sample彩度與色差、trajectory。
+- 根目錄`summary.json`：四組子集平均、比gray改善的張數、發生tile備援的圖片。
+
+先確認未切塊圖片中的自然物體是否也灰階，再看train/val及online/EMA/Direct/sample
+差異。若某圖進入fallback，不能把方塊直接歸因於模型。8張子集不是全資料集驗證，
+整張圖的平均彩度也不是物體辨識指標，需一起看固定比較圖。

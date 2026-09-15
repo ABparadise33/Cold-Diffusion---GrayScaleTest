@@ -17,10 +17,10 @@ from gray_cold_diffusion.official_colorization import RGBDecolorization, channel
 from gray_cold_diffusion.official_preview import save_full_scene_previews, select_preview_images
 from gray_cold_diffusion.official_training import (
     PRE_SPATIAL_SOURCE_SHA256,
+    PRE_FULLFRAME_SOURCE_SHA256,
     compatible_preview_revision,
     implementation_fingerprint,
 )
-from gray_cold_diffusion.tiling import TiledModel
 
 
 def test_five_unique_step_seeded_images_leave_global_rng_untouched():
@@ -77,8 +77,9 @@ def test_preview_step_folders_five_scenes_geometry_and_same_sampler_pixels(tmp_p
             rgb = _to_tensor(image.convert('RGB')).unsqueeze(0)
             width, height = image.size
         anchor = channel_gray(normalize_rgb(rgb))
-        model = TiledModel(trainer.ema, 16, 4)
-        # Independent old preview computation: same input/model/bridge, new paths only.
+        model = trainer.ema
+        assert row["inference"]["method"] == "full_image"
+        # Independent whole-image computation; no tiles unless CUDA OOM.
         with torch.no_grad():
             predicted = denormalize_rgb(trainer.bridge.sample(model, anchor))[0]
             direct = denormalize_rgb(model(anchor, torch.tensor([2])))[0]
@@ -122,3 +123,11 @@ def test_preview_migration_does_not_relax_other_source_or_sampler_checks():
     assert compatible_preview_revision(pre_spatial, current)
     pre_spatial['source_sha256'] = {**PRE_SPATIAL_SOURCE_SHA256, 'factory.py': 'unrecognized hash'}
     assert not compatible_preview_revision(pre_spatial, current)
+
+
+def test_known_fullframe_migration_rejects_training_changes():
+    current = {'sampler': 'paper_algorithm2', 'source_sha256': implementation_fingerprint()}
+    old = {'sampler': 'paper_algorithm2', 'source_sha256': dict(PRE_FULLFRAME_SOURCE_SHA256)}
+    assert compatible_preview_revision(old, current)
+    old['source_sha256']['engine.py'] = 'changed training'
+    assert not compatible_preview_revision(old, current)

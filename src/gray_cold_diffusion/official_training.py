@@ -31,15 +31,18 @@ PRE_SPATIAL_SOURCE_SHA256 = {
 }
 
 
+PRE_FULLFRAME_SOURCE_SHA256 = {'official_convnext.py': 'd71636fc0a4305f1eae12607587793a6816b7c68a681dc460170be2d16aa6dad', 'official_colorization.py': '075c913bbae6e0e315a6e6d612854514e76c70ecd2cbc6664eda0331a6069dde', 'official_training.py': '701502af440caa97efaa6ffb89b1ea1a4138b1122ef2aa879754629a69646e13', 'official_preview.py': '8f8e29fd849d2e24036eeada3ee22670d67aef5a0f0bd8ea7ee2d7e5b28fad48', 'spatial_chroma.py': '23906ba85835069e59a0d28833684d7fd49e1debe3b73756e72be44c54d6f645', 'factory.py': 'fc3079840ae1469a1634f87745bb29982d22ed005f95027ed2f6a2fffb6dfc96', 'engine.py': '1d03b085a3916c805175eac1a55815f4526df928253d2da09c300e212e693e02', 'data.py': '3d36efdfcfda94b80063891fa1b489e54bd4934226ea4958f2891ffdcada5e29', 'color.py': '1928debe792621428efa9210ce4efda1d83fd772eca0d202ef42b63ef0b94ffa', 'io.py': '6f96d84bb17f8d949aeb32cd092b98cb152cb124d6edf0d10531e9761092985e', 'tiling.py': '09c61ac095572d105449dd6af6745bdcb3fca761a5806d3cc26278a92cc5355c'}
+
+
 def implementation_fingerprint():
     base = Path(__file__).parent
     names = ('official_convnext.py', 'official_colorization.py', 'official_training.py', 'official_preview.py',
-             'spatial_chroma.py', 'factory.py', 'engine.py', 'data.py', 'color.py', 'io.py', 'tiling.py')
+             'spatial_chroma.py', 'factory.py', 'engine.py', 'data.py', 'color.py', 'io.py', 'tiling.py', 'fullframe.py')
     return {name: hashlib.sha256((base / name).read_bytes()).hexdigest() for name in names}
 
 
 def compatible_preview_revision(saved, current):
-    """Only the reviewed fixed-0803 -> random-five preview migration is allowed.
+    """Only the reviewed preview revisions (seeded scenes / full-frame first) are allowed.
 
     All other source hashes and implementation settings remain strict. Do not
     extend this migration to future training/model changes without a new audit.
@@ -51,6 +54,8 @@ def compatible_preview_revision(saved, current):
     old_hashes = saved.get('source_sha256', {})
     new_hashes = current.get('source_sha256', {})
     candidates = [old_hashes]
+    if old_hashes == PRE_FULLFRAME_SOURCE_SHA256:
+        candidates.append(new_hashes)
     if (old_hashes.get('official_training.py') ==
             '789c81f26dfa83f4c739c4d2f12adb87b1769a0af593ac98983af4d6cf9c7b3c'
             and 'official_preview.py' not in old_hashes):
@@ -155,7 +160,7 @@ class OfficialTrainer(Trainer):
                 'effective_batch': self.grad_accum * self.config['training']['batch_size'],
                 'dataset_fingerprint_kind': 'sorted names and byte sizes, NOT image content hashes',
                 'data_loader_resume': 'new shuffled iterator; not a bitwise replay of crop/order',
-                'validation': 'all fixed center crops; separate random full-scene tiled previews',
+                'validation': 'all fixed center crops; random full-scene previews, tiled only after CUDA OOM',
                 'preview': {'count': int(self.config['training'].get('preview_count', 5)),
                             'every': self.config['training']['validate_every'], 'also_at_final_step': True,
                             'selection': 'local seed+step RNG; validation split only',
@@ -204,7 +209,7 @@ class OfficialTrainer(Trainer):
         if preview_migration:
             self.run_metadata['preview_only_resume_migration'] = {
                 'from_implementation': saved['implementation'],
-                'reason': 'fixed 0803 preview replaced by five seeded validation images per step folder',
+                'reason': 'reviewed preview-only migration: seeded scenes and/or whole-frame-first OOM fallback',
             }
             print('resume: verified known preview-only revision; training/model fingerprints otherwise unchanged')
         del payload

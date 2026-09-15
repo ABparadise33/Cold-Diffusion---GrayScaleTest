@@ -10,7 +10,7 @@ for sampler in paper_algorithm2 official_code; do
     --raw-dir "${UIEB_RAW_DIR:-data/UIEB/raw-890}"
     --reference-dir "${UIEB_REFERENCE_DIR:-data/UIEB/reference-890}"
     --split-file "${UIEB_SPLIT_FILE:-splits/uieb_seed42.json}" --split test --device cuda
-    --original-size --batch-size 1 --tile-size "${OFFICIAL_TILE_SIZE:-256}" --tile-overlap 32
+    --original-size --batch-size 1
     --sampler "$sampler" --preview-count 4 --preview-max-side 512
     --output-layout compact --output-dir "$output_root/$sampler")
   if [[ "${OFFICIAL_DRY_RUN:-0}" == 1 ]]; then

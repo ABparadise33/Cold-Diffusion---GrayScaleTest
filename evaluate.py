@@ -30,12 +30,18 @@ from gray_cold_diffusion.factory import (
 )
 from gray_cold_diffusion.report import save_training_report
 from gray_cold_diffusion.tiling import TiledModel
+from gray_cold_diffusion.fullframe import run_fullframe
 from gray_cold_diffusion.official_partial import partial_raw_input, retained_color_start_step, sample_from_step
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
+    parser.add_argument('--weights', choices=['ema', 'model'], default='ema',
+                        help='EMA or current online training weights from the same checkpoint')
+    parser.add_argument('--oom-tile-size', type=int, default=512,
+                        help='retry full prediction with tiles ONLY after CUDA OOM; 0 disables fallback')
+    parser.add_argument('--oom-tile-overlap', type=int, default=64)
     parser.add_argument("--expected-checkpoint-step", type=int,
                         help="optional guard against evaluating best.pt from an unintended training step")
     parser.add_argument('--include-direct', action='store_true',
@@ -85,7 +91,7 @@ def main():
 
     device = select_device(args.device)
     checkpoint_path = Path(args.checkpoint)
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     if args.expected_checkpoint_step is not None and checkpoint.get('step') != args.expected_checkpoint_step:
         parser.error(f'checkpoint step is {checkpoint.get("step")}, expected {args.expected_checkpoint_step}')
     config = checkpoint["config"]
@@ -111,7 +117,10 @@ def main():
         torch.backends.cudnn.allow_tf32 = False
     model, bridge = build_model_and_bridge(config)
     model = model.to(device)
-    model.load_state_dict(checkpoint["ema"])
+    model.load_state_dict(checkpoint[args.weights])
+    # Optimizer and unused weight copies must not occupy GPU memory during inference.
+    for key in ('model', 'ema', 'optimizer', 'scaler'):
+        checkpoint.pop(key, None)
     model.eval()
     bridge = bridge.to(device)
     if args.original_size and args.batch_size != 1:
@@ -123,6 +132,8 @@ def main():
             parser.error("--tile-size must be >= 1")
         if args.tile_overlap < 0 or args.tile_overlap >= args.tile_size:
             parser.error("--tile-overlap must satisfy 0 <= overlap < tile-size")
+    if args.oom_tile_size < 0 or (args.oom_tile_size and not 0 <= args.oom_tile_overlap < args.oom_tile_size):
+        parser.error('invalid OOM fallback tile/overlap')
     inference_model = (
         TiledModel(model, args.tile_size, args.tile_overlap)
         if args.tile_size is not None
@@ -174,6 +185,8 @@ def main():
     if compute_direct:
         identity_totals['direct_mae_255'] = 0.0
     per_image_core = []
+    color_diagnostics = []
+    inference_routes = []
     prediction_dir = output / "predictions"
     direct_prediction_dir = output / "direct_predictions"
     evaluation_reference_dir = output / "references"
@@ -207,23 +220,39 @@ def main():
             if retention_diagnostic:
                 anchor = partial_raw_input(bridge, raw_state, start_step)
             t = torch.full((raw.shape[0],), start_step, device=device, dtype=torch.long)
-            if mode in iterative_modes:
-                direct = None
-                if compute_direct:
-                    direct_state = inference_model(anchor, t).clamp(-1, 1)
-                    direct = state_to_rgb(direct_state)
-                if retention_diagnostic:
-                    pred_state, trajectory = sample_from_step(bridge, inference_model, anchor, start_step)
+            def infer(active_model, anchor=anchor, raw_state=raw_state, t=t):
+                if mode in iterative_modes:
+                    direct = None
+                    if compute_direct:
+                        direct_state = active_model(anchor, t).clamp(-1, 1)
+                        direct = state_to_rgb(direct_state)
+                    if retention_diagnostic:
+                        pred_state, trajectory = sample_from_step(bridge, active_model, anchor, start_step)
+                    else:
+                        pred_state, trajectory = bridge.sample(
+                            active_model, anchor, return_trajectory=True
+                        )
                 else:
-                    pred_state, trajectory = bridge.sample(
-                        inference_model, anchor, return_trajectory=True
-                    )
+                    direct_state = None
+                    direct = None
+                    state = anchor if mode == "gray_oneshot" else raw_state
+                    pred_state = active_model(state, t).clamp(-1, 1)
+                    trajectory = [state, pred_state]
+                return direct, pred_state, trajectory
+
+            if args.tile_size is not None:
+                (direct, pred_state, trajectory) = infer(inference_model)
+                route = {'method': 'explicit_tiles', 'tile_size': args.tile_size, 'overlap': args.tile_overlap}
             else:
-                direct_state = None
-                direct = None
-                state = anchor if mode == "gray_oneshot" else raw_state
-                pred_state = inference_model(state, t).clamp(-1, 1)
-                trajectory = [state, pred_state]
+                (direct, pred_state, trajectory), route = run_fullframe(
+                    infer, model, device=device,
+                    fallback_tile=(args.oom_tile_size or None) if raw.shape[0] == 1 else None,
+                    overlap=args.oom_tile_overlap,
+                )
+            route_record = {'images': list(batch['name']), **route}
+            inference_routes.append(route_record)
+            with (report_dir / 'inference_routes.jsonl').open('a') as handle:
+                handle.write(json.dumps(route_record) + '\n')
             pred = state_to_rgb(pred_state)
             pred_lab = rgb_to_normalized_lab(pred)
             trajectory_lab = [rgb_to_normalized_lab(state_to_rgb(state)) for state in trajectory]
@@ -281,6 +310,23 @@ def main():
                             'psnr': float(batch_direct_psnr[index]), 'ssim': float(batch_direct_ssim[index]),
                             'delta_e76': float(batch_direct_delta_e[index]),
                         }
+            gray_rgb = state_to_rgb(anchor)
+            gray_lab = rgb_to_normalized_lab(gray_rgb)
+            def color_score(candidate_lab, index, target_lab=target_lab):
+                chroma = candidate_lab[index, 1:].square().sum(0).sqrt() * 128
+                target_chroma = target_lab[index, 1:].square().sum(0).sqrt().mean() * 128
+                return {'chroma': chroma.mean().item(),
+                        'chroma_ratio': (chroma.mean() / target_chroma.clamp_min(1e-8)).item(),
+                        'delta_e76': delta_e76(candidate_lab[index:index+1], target_lab[index:index+1]).item()}
+            for index, name in enumerate(batch['name']):
+                row = {'image': name, 'weights': args.weights, 'inference': route,
+                       'target': color_score(target_lab, index), 'gray_input': color_score(gray_lab, index),
+                       'sample': color_score(pred_lab, index),
+                       'trajectory': [color_score(lab, index) for lab in trajectory_lab]}
+                if direct is not None:
+                    row['direct'] = color_score(direct_lab, index)
+                color_diagnostics.append(row)
+            # Release the previous image trajectory before the next full-image forward.
             if args.extended_metrics or mode == OFFICIAL_MODE or compact:
                 for image_index, name in enumerate(batch["name"]):
                     save_tensor_image(pred[image_index], prediction_dir / f"{name}.png")
@@ -336,6 +382,10 @@ def main():
                     )
                 preview_saved += 1
             print(f"inference {count}/{len(dataset)}")
+            del infer, color_score, pred_state, trajectory, trajectory_lab, pred, pred_lab, direct, raw, reference, target_lab, raw_state, anchor, gray_rgb, gray_lab
+            if compute_direct:
+                del direct_lab
+
     metrics = {key: value / count for key, value in totals.items()}
     if direct_totals is not None:
         metrics["direct"] = {key: value / count for key, value in direct_totals.items()}
@@ -343,6 +393,9 @@ def main():
     metrics["evaluation"] = {
         "checkpoint": str(checkpoint_path.resolve()),
         "checkpoint_step": int(checkpoint.get("step", -1)),
+        "weights": args.weights,
+        "inference_routes": inference_routes,
+        "oom_fallback_tile_size": args.oom_tile_size or None,
         "split": args.split,
         "num_images": count,
         "image_size": image_size,
@@ -394,6 +447,7 @@ def main():
             'interpretation': 'Returning to raw is desaturation inversion, not evidence of underwater enhancement.',
         })
         (report_dir / 'per_image_core.json').write_text(json.dumps(per_image_core, indent=2), encoding='utf-8')
+    (report_dir / 'color_diagnostics.json').write_text(json.dumps(color_diagnostics, indent=2))
     # Persist core evidence before optional metric models/downloads can fail.
     (report_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 

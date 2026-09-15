@@ -10,7 +10,7 @@ from .color import denormalize_rgb, normalize_rgb
 from .data import _to_tensor
 from .io import save_stage_strip, save_tensor_image
 from .official_colorization import channel_gray
-from .tiling import TiledModel
+from .fullframe import run_fullframe
 
 
 def select_preview_images(paths, seed, step, count=5):
@@ -51,15 +51,16 @@ def save_full_scene_previews(trainer):
         'sampling': 'without replacement within step; independent draws across steps',
         'sampling_seed': sampling_seed, 'requested_count': count, 'actual_count': len(selected),
         'selected_images': [str(path) for path in selected], 'completed_images': [],
-        'sampler': trainer.bridge.sampler, 'tile_size': cfg['preview_tile_size'],
-        'tile_overlap': cfg['preview_tile_overlap'], 'display_max_side': cfg['preview_max_side'],
+        'sampler': trainer.bridge.sampler, 'spatial_policy': 'full_image_first',
+        'oom_fallback_tile_size': cfg['preview_tile_size'],
+        'oom_fallback_tile_overlap': cfg['preview_tile_overlap'], 'display_max_side': cfg['preview_max_side'],
         'direct_preview': bool(cfg.get('preview_direct', True)),
         'standalone_prediction': 'original geometry; no resize', 'status': 'in_progress',
     }
     metadata_path = output / 'preview.json'
     metadata_path.write_text(json.dumps(manifest, indent=2))
     trainer.ema.eval()
-    model = TiledModel(trainer.ema, int(cfg['preview_tile_size']), int(cfg['preview_tile_overlap']))
+    model = trainer.ema
     # Process full scenes one at a time; do not batch five large DIV2K images.
     for selected_path in selected:
         row = _save_one_preview(trainer, model, selected_path, output, cfg)
@@ -75,8 +76,14 @@ def _save_one_preview(trainer, model, selected, output, cfg):
         rgb = _to_tensor(image.convert('RGB')).unsqueeze(0).to(trainer.device)
     anchor = channel_gray(normalize_rgb(rgb))
     t = torch.tensor([trainer.bridge.steps], device=trainer.device)
-    direct = denormalize_rgb(model(anchor, t)) if cfg.get('preview_direct', True) else None
-    predicted_state, trajectory = trainer.bridge.sample(model, anchor, return_trajectory=True)
+    def infer(active):
+        direct = denormalize_rgb(active(anchor, t)) if cfg.get('preview_direct', True) else None
+        predicted_state, trajectory = trainer.bridge.sample(active, anchor, return_trajectory=True)
+        return direct, predicted_state, trajectory
+    (direct, predicted_state, trajectory), route = run_fullframe(
+        infer, model, device=trainer.device, fallback_tile=int(cfg['preview_tile_size']),
+        overlap=int(cfg['preview_tile_overlap']),
+    )
     # Keep trajectories on CPU, releasing all scene tensors per image.
     stages = [('s=T full gray', denormalize_rgb(trajectory[0]).cpu())]
     stages.extend((f'update {index}/{trainer.bridge.steps}', denormalize_rgb(state).cpu())
@@ -91,4 +98,4 @@ def _save_one_preview(trainer, model, selected, output, cfg):
     panels.append((trainer.bridge.sampler, predicted))
     save_stage_strip(panels, output / 'samples' / filename, max_side=int(cfg['preview_max_side']))
     save_stage_strip(stages, output / 'trajectories' / filename, max_side=int(cfg['preview_max_side']))
-    return {'image': str(selected), 'filename': filename, 'original_hw': list(rgb.shape[-2:])}
+    return {'image': str(selected), 'filename': filename, 'original_hw': list(rgb.shape[-2:]), 'inference': route}

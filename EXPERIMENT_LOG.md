@@ -216,3 +216,11 @@ Record real experiments here. Do not treat smoke tests as scientific evidence.
 - Reproduction: `bash scripts/train_mixed_uieb_div2k_4090.sh` with `UIEB_REFERENCE_DIR` and `DIV2K_DATA_ROOT` pointing to source datasets; details in `docs/mixed_training.md`.
 - Status: implementation verification only, no trained results or improvement claim. Inspect at10k before extending.
 - Verification: existing suite143 passed/1 skipped; new mixed tests3 passed; Ruff and shell syntax passed. CPU synthetic 2-step train plus resume to3 passed; inspected JSONL for both domains/splits, all reverse steps, zero endpoint error, and actual t=T exposure. Smoke numbers are not scientific results.
+
+## 2026-09-15 — Whole-frame-first inference and natural colorization diagnostic
+
+- User reports fixed-checkpoint tile/untiled comparison confirms the square blocks are caused by tiling; object grayscale persists. These are user-reported results, not a new locally executed GPU comparison.
+- Change: Evaluate and full-scene training previews attempt whole-frame inference first, retry the complete Direct+sampling operation only on CUDA OOM, record per-image spatial routes. Explicit tiles remain an ablation option; --oom-tile-size0 disables fallback. CPU-loaded checkpoints avoid putting unused optimizer/weight copies on GPU.
+- Diagnostic: `bash scripts/diagnose_natural_fullgray.sh`, same mixed best.pt, fixed seed42 train/val DIV2K8 each, both online and EMA weights, Direct and Algorithm2 from full gray. Full geometry, checkpoint/image SHA256, per-image chroma/DE and trajectories, summary and fallback image lists. No saturation edit, no retained color, no retraining; subset averages do not measure object-specific success.
+- Validation:161 passed/1 skipped; Ruff and shell syntax passed; simulated CUDA OOM verifies restart/RNG restoration and exception filtering. End-to-end synthetic CPU diagnostic covers four split/weight combinations, geometry and weight selection. Prior mixed synthetic checkpoint resumed3→4 with the reviewed preview-only migration. No real GPU checkpoint inference or natural-image result was produced locally.
+- Decision: run the fixed natural-image diagnostic on the GPU instance before deciding on further training. Inspect untiled train/val scenes and online/EMA Direct/sample differences; do not infer underwater-specific failure from Test90 alone.

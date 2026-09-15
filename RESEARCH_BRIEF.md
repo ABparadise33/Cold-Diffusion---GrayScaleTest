@@ -396,3 +396,10 @@ Lab-chroma factors until the fixed preview passes visual inspection.
 - Failure meaning: Gray direct and sampled output suggests target/endpoint/fit issues; colored direct but gray sampler suggests reverse-update issues; train-only success suggests generalization. These are diagnostic leads, not automatic causal conclusions.
 - Success continuation: If color fidelity improves consistently, repeat seeds and evaluate real raw inputs and fresh held-out data before claiming underwater enhancement.
 - Stop: Stop at10k and inspect logs before extending; no automatic50k run. Treat nonfinite diagnostic states as a failure requiring inspection; preserve artifacts.
+
+## 2026-09-15 — Fixed-checkpoint natural-image diagnostic before resuming
+
+- User's tile-size/untiled comparison identifies square blocks as tiling artifacts. Object color remains absent by user observation. Do not assume that it is specific to underwater transfer.
+- Hypothesis/test: On the same trained checkpoint, fixed seed42 DIV2K train and val subsets (8 each), synthesize full gray from each original and compare online/EMA Direct and Algorithm2. Full-image first, only CUDA OOM permits logged fallback; no retraining. Target/source hashes and checkpoint identity fixed across all four comparisons.
+- Evaluation: Preserve geometry, compare target/gray/direct/sample visually and via per-image Delta-E76 and chroma; record all reverse steps and actual spatial route. Train-only success points toward generalization; neither split improving points toward fit/endpoint/representation. Colored Direct but gray sample motivates sampler inspection. None proves a mechanism by itself.
+- Budget/stop: Inference only on32 model-image combinations (16 images ×2 weight types). Stop to inspect diagnostic evidence before any15k continuation. Current local scope is implementation/synthetic verification; real checkpoint and DIV2K source data are on the user's GPU instance.
