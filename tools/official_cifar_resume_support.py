@@ -36,6 +36,7 @@ def save_checkpoint(trainer, save_with_time_stamp=False):
         'model': trainer.model.state_dict(), 'ema': trainer.ema_model.state_dict(),
         'optimizer': trainer.opt.state_dict(), 'signature': signature(trainer),
         'resume_history': getattr(trainer, '_resume_history', []),
+        'monitoring_state': getattr(trainer, '_monitoring_state', {'loss_window': [], 'last_monitor_step': None}),
         'rng': {'python': random.getstate(), 'torch': torch.get_rng_state(),
                 'numpy': [np_state[0], np_state[1].tolist(), int(np_state[2]), int(np_state[3]), float(np_state[4])]},
         'runtime': {'torch': str(torch.__version__), 'cuda': torch.version.cuda},
@@ -83,6 +84,7 @@ def load_checkpoint(trainer, load_path):
     trainer.ema_model.load_state_dict(state['ema'])
     trainer.step = int(state['step'])
     trainer._resume_history = list(state.get('resume_history', []))
+    trainer._monitoring_state = state.get('monitoring_state', {'loss_window': [], 'last_monitor_step': None})
     event = {'path': str(Path(load_path).resolve()), 'step': trainer.step,
              'optimizer_restored': not legacy, 'rng_restored': not legacy,
              'note': 'legacy 10k weights+EMA; Adam restarted, old moments cannot be recovered' if legacy else 'optimizer and RNG restored; DataLoader order restarts'}
@@ -135,6 +137,7 @@ def log_preview_color(trainer, samples):
     hashes = [hashlib.sha256(x.detach().cpu().float().contiguous().numpy().tobytes()).hexdigest()
               for x in samples['og']]
     event = {'schema_version': 2, 'step': int(trainer.step),
+             'run_id': getattr(trainer, 'metric_run_id', None),
              'utc': datetime.now(timezone.utc).isoformat(),
              'split': getattr(trainer, 'metric_split', 'train_preview'), 'weights': 'ema',
              'preview_index': int(trainer.step // trainer.save_and_sample_every),

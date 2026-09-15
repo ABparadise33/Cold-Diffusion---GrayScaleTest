@@ -56,6 +56,25 @@ def patch(root):
         text = color_marker + '\nfrom codex_cifar_resume import log_preview_color as _cifar_log_color\n' + text
         ast.parse(text)
         source.write_text(text)
+    text = source.read_text()
+    monitor_marker = '# CODEX_CIFAR_FIXED_MONITOR_V1'
+    if monitor_marker not in text:
+        hooks = {
+            '        while self.step < self.train_num_steps:':
+                '        _cifar_monitor_init(self)\n\n        while self.step < self.train_num_steps:\n            _cifar_losses = []',
+            '                loss = self.model(data)':
+                '                loss = self.model(data)\n                _cifar_losses.append(float(loss.detach().item()))',
+            '            self.step += 1':
+                '            self.step += 1\n            _cifar_record_update(self, _cifar_losses)',
+        }
+        for old, new in hooks.items():
+            if text.count(old) != 1:
+                raise ValueError(f'Cannot locate unique monitoring hook: {old}')
+            text = text.replace(old, new)
+        text = monitor_marker + '\nfrom codex_cifar_monitor import initialize as _cifar_monitor_init, record_update as _cifar_record_update\n' + text
+        ast.parse(text)
+        source.write_text(text)
+    shutil.copy2(Path(__file__).with_name('official_cifar_monitor.py'), root/'codex_cifar_monitor.py')
     # The preceding pilot instructions may have supplied explicit 1k cadence.
     # Preserve other Trainer arguments; set checkpoint milestones to10k to bound disk use.
     tree = ast.parse(training)
@@ -85,9 +104,9 @@ def patch(root):
     training = training.replace('trainer.train()\ntrainer.save()\ntrainer.save(save_with_time_stamp=True)', 'trainer.train()')
     train_path.write_text(training)
     shutil.copy2(support, root/'codex_cifar_resume.py')
-    metadata = {'version':1,'changes':['checkpoint optimizer/RNG', 'completed update counters after EMA', 'final save', '1k latest/preview and10k milestones', 'per-preview CIE76/ab/chroma logs'],
+    metadata = {'version':1,'changes':['checkpoint optimizer/RNG', 'completed update counters after EMA', 'final save', '1k latest/preview and10k milestones', 'per-preview CIE76/ab/chroma logs', 'per-update/window loss and fixed1000-image monitoring'],
                 'data_loader': 'new iterator on resume, not bitwise data-order replay',
-                'sha256':{str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in [source,train_path,root/'codex_cifar_resume.py']}}
+                'sha256':{str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in [source,train_path,root/'codex_cifar_resume.py',root/'codex_cifar_monitor.py']}}
     (root/'cifar_resume_patch.json').write_text(json.dumps(metadata,indent=2))
     print('Official resume patch ready:', root)
 

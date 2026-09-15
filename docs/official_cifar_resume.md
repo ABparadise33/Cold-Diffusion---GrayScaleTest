@@ -37,6 +37,36 @@ RGB新增 `rgb_mae`（平均絕對誤差）、`rgb_mse`、`rgb_rmse`，使用sRG
 
 更新程式需在目前訓練程序停止後，於外層 `git pull --ff-only` 再執行相同續訓指令；已執行中的Python不會即時套用更新，不要同時啟動第二份訓練。新記錄從下一個1k預覽開始。
 
+## Loss與固定圖片監測
+
+新版本在續訓開始前建立當前checkpoint的固定監測基準，此後每1k更新一次。原本隨機訓練預覽保留。
+
+- `train_loss_steps.csv` / `.jsonl`：每個已完成optimizer step的平均loss（兩個累積microbatch的原始loss平均，沒有重複除以2），JSONL另含兩個原始值。記錄step、run_id、lr。
+- `train_loss_windows.csv`：每1k更新的mean/std/min/max與實際樣本數；中途起跑不足1k會如實記錄count/start_step。未完成的區間跟checkpoint一起保存，續訓接回；rollback後run_id可區分重跑紀錄。
+- `fixed_monitor/manifest.json`：CIFAR10 test每類100張，共1,000張，固定seed42選樣、索引排序、無隨機augmentation；保留索引與原圖hash，資料變更會拒絕沿用同一監測目錄。
+- `fixed_monitor/summary.csv` / `.jsonl`：同一批1,000張的灰階、EMA Direct、EMA recon，RGB MAE/MSE/逐圖RMSE平均、Lab CIE76、ab誤差、彩度、裁切比例與相對灰階改善量。
+- `fixed_monitor/preview_color_metrics.jsonl` / `preview_color_metrics_v2.csv`：逐圖／逐批資料；`step_<step>/{og,xt,direct_recons,recon}.png`：固定前32張對照。
+
+這1,000張test資料已用於監測與續訓決策，因此扮演validation角色，不是未接觸過的最終test。初始化與監測隔離Python/NumPy/PyTorch/CUDA RNG、使用EMA eval/no_grad並還原原有module模式；不消耗訓練DataLoader、不修改loss或訓練資料。第一次需要原CIFAR10 test資料仍在train dataset root。
+
+### 下一段預算／停訓建議（尚未自動啟用）
+
+- 建議先考慮總共120k（從100k再20k），不要直接延長到700k。理由是50k→100k完整test CIE76僅改善0.0303。
+- 以固定監測集recon CIE76為主，RGB MAE與ab誤差為交叉檢查；彩度僅作診斷。將最近3次1k監測的CIE76平均作為觀察曲線，保留原始值。
+- 初步實用門檻可用CIE76下降0.05；連續10k沒有達到相對先前有效最佳值的改善，就先暫停檢查。這是計算預算的暫定門檻，不是經統計推導的普遍收斂標準；應根據監測集的逐圖配對差異與短期波動重新確認。未達0.05的小幅單次改善不重設觀察期間。
+- 若loss持續下降但RGB/Lab色差持平／惡化，不把loss下降當作續訓充分理由；若固定集有改善，在120k做較大範圍的評估後再決定下一段。
+- 目前只記錄，**不自動早停**，預設訓練上限仍是100k。上述條件需人工檢查，並非已實作的自動停止器。
+
+只有決定續訓後，才執行以下指令（會開始訓練）：
+
+```bash
+cd /workspace/Cold-Diffusion---GrayScaleTest
+git pull --ff-only
+CIFAR_TRAIN_STEPS=120000 bash scripts/resume_official_cifar10.sh
+```
+
+新120k實驗從100k的 `model_100000.pt` 恢復Adam/EMA/step/RNG，寫入獨立 `results/cifar10_rgb_fullgray_120k/`，保留原100k結果；中斷後同一指令優先讀120k目錄的 `model.pt`。DataLoader順序仍非逐筆重播。腳本要求上限為1k倍數；不會自行從100k提升到120k。
+
 ## Evaluate
 
 100k已完成後不用再訓練，於外層專案執行：

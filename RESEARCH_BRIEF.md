@@ -419,3 +419,11 @@ Lab-chroma factors until the fixed preview passes visual inspection.
 - User reports100k complete and provides two training preview grids. Test generalization on all10,000 held-out CIFAR10 images, fixed index order, EMA,32px/full-gray/T20; no additional training authorized by this evaluation step.
 - Correct limitation: official test_from_data returns after first batch, so prior preview commands were not full-test metrics. New wrapper calls the unchanged official sampler across the entire test split, includes the short last batch, and records per-image identities.
 - Evidence/stop: RGB MAE/MSE/RMSE and CIE76/ab/chroma versus paired ground truth, gray baseline, Direct and final sample. Budget one full evaluation/checkpoint, retain hashes and fixed first-batch grids. Compare10k and100k before any larger training budget; training previews alone cannot establish generalization.
+
+## 2026-09-15 — Loss and fixed-input convergence monitoring
+
+- Authorized scope: implement per-optimizer-step/window loss and fixed-input color diagnostics. User asks how to choose future bounds; no further GPU training launched or default budget increased.
+- Evidence:50k→100k recon CIE76 only -0.03033, while chroma+15.25%; need disentangle training-loss progress from endpoint color fidelity before scaling.
+- Mechanism/test: average accumulation microbatch losses,1k window stats preserved through checkpoint; EMA monitor on fixed100/class CIFAR test subset (1,000 images) at resume baseline and every1k. Isolate RNG/module modes and avoid training iterator consumption. Verify with CPU synthetic cases and pinned-source patch migration.
+- Evaluation: paired RGB/Lab metrics versus unchanged target hashes, direct versus final sample, raw/moving-average loss; monitored test is validation-role evidence. No model/loss/optimizer changes.
+- Proposed future budget, not launched:100k→120k maximum, review if10k passes without practical CIE76 improvement0.05 (suggested threshold requiring variability assessment); smooth3 monitor points and cross-check RGB/ab. Logging only, no automatic early stopping or automatic extension.

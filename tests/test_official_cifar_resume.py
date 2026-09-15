@@ -46,6 +46,7 @@ def test_restore_adam_rng_and_next_update(tmp_path, monkeypatch):
     monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
     a = trainer(tmp_path)
     update(a)
+    a._monitoring_state = {'loss_window': [{'step': 10000, 'loss': .3}], 'last_monitor_step': 9000}
     support.save_checkpoint(a)
     # Compatible with default torch.load on newer PyTorch, without numpy globals.
     assert torch.load(tmp_path/'model.pt', weights_only=True)['step'] == 10000
@@ -60,6 +61,7 @@ def test_restore_adam_rng_and_next_update(tmp_path, monkeypatch):
     for x, y in zip(a.model.parameters(), b.model.parameters()):
         torch.testing.assert_close(x, y, rtol=0, atol=0)
     assert b.step == 10000
+    assert b._monitoring_state == a._monitoring_state
     assert b._resume_history[-1]['optimizer_restored']
 
 
@@ -113,6 +115,8 @@ def test_patcher_completed_update_count_and_idempotence(tmp_path):
         pass
     def train(self):
         while self.step < self.train_num_steps:
+            for data in [1]:
+                loss = self.model(data)
             self.opt.step()
             if self.step % self.update_ema_every == 0:
                 self.step_ema()
@@ -139,12 +143,13 @@ trainer.save(save_with_time_stamp=True)
     first = source.read_text()
     patcher.patch(tmp_path)
     assert source.read_text() == first
-    namespace = {'_cifar_log_color': lambda *args: None}
-    exec('\n'.join(x for x in first.splitlines() if not x.startswith('from codex_cifar_resume')), namespace)
+    namespace = {'_cifar_log_color': lambda *args: None, '_cifar_monitor_init': lambda *args: None, '_cifar_record_update': lambda *args: None}
+    exec('\n'.join(x for x in first.splitlines() if not x.startswith('from codex_cifar_')), namespace)
     t = namespace['Trainer']()
     t.step, t.train_num_steps = 10000, 10003
     t.update_ema_every, t.save_and_sample_every = 10, 1
     updates, saved, ema = [], [], []
+    t.model = lambda data: torch.tensor(1.)
     t.opt = SimpleNamespace(step=lambda: updates.append(1))
     t.save = lambda save_with_time_stamp=False: saved.append((t.step, len(updates)))
     t.step_ema = lambda: ema.append(t.step)
