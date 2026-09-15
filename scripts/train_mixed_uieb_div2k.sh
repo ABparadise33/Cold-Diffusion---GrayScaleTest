@@ -12,6 +12,10 @@ if [[ ! -d "$uieb_default" && -z "${UIEB_DATA_ROOT:-}" ]]; then
 fi
 uieb_reference="${UIEB_REFERENCE_DIR:-$uieb_default}"
 mixed_root="${MIXED_DATA_ROOT:-$repo_root/data/UIEB_DIV2K}"
+if [[ "${MIXED_FULL_SCENE_PREVIEWS:-1}" != 0 && "${MIXED_FULL_SCENE_PREVIEWS:-1}" != 1 ]]; then
+  echo 'MIXED_FULL_SCENE_PREVIEWS must be 0 or 1' >&2
+  exit 1
+fi
 "$python_bin" tools/check_environment.py --require-cuda --min-vram-gb 20
 "$python_bin" tools/prepare_mixed_colorization.py \
   --uieb-reference "$uieb_reference" --split-file splits/uieb_seed42.json \

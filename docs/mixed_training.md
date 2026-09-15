@@ -81,7 +81,7 @@ All model outputs are under `outputs/uieb_div2k_rgb_fullgray_pilot/`:
 
 - `debug_diagnostics.jsonl`: append-only exposure counts every50 steps; fixed
   center-crop diagnostics at startup and every1000 steps plus final validation.
-  Each domain contributes two fixed train and two fixed val images. These are
+  Each domain contributes up to eight fixed train and eight fixed val images (32 total). These are
   diagnostic subsets, **not** full-domain validation aggregates.
 - Each diagnostic records target/gray/direct online/direct EMA/sampled EMA RGB
   state range, nonfinite check, clipping fraction, unclipped chroma RMS,
@@ -90,10 +90,16 @@ All model outputs are under `outputs/uieb_div2k_rgb_fullgray_pilot/`:
 - Training timestep histograms include actual t=T exposure; domain and timestep
   counts restart on resume and are explicitly labelled as such.
 - `debug_previews/step_*/train|val/`: fixed target/gray/direct/sample strips.
+- `fixed_color_per_image.csv`: paired RGB MAE/RMSE, Lab Delta-E76/ab error,
+  chroma, target tensor and preview hashes for gray/direct EMA/sample EMA.
+- `fixed_color_summary.csv`: separate train/val and UIEB/DIV2K subset means.
+  Each completed diagnostic pass has an ID to distinguish retries.
+- `metrics.csv`: training L1 averaged over the logged window (default50 optimizer
+  updates, each already averaged across gradient accumulation), plus validation.
 - `full_gray_metrics.csv`: full combined validation center-crop metrics.
 - `previews/step_*/`: existing random validation full-scene comparisons/trajectories.
 - `run_manifest.json`: config, source fingerprints, dataset hashes, sampling rule.
-- `checkpoints/`: latest/best/final weights; `logs/mixed_*.log` at repository root
+- `checkpoints/`: latest/best and permanent checkpoints every10k (also final); `logs/mixed_*.log` at repository root
   captures console output including failures.
 
 ## How to interpret failures
@@ -109,7 +115,7 @@ All model outputs are under `outputs/uieb_div2k_rgb_fullgray_pilot/`:
 6. More colorful but worse Delta-E: appearance change is not accurate restoration.
 
 Diagnostics do not increase target saturation or alter endpoint sampling/loss.
-Review at10k before a longer run. GPU training was not executed on the Mac.
+Pilot defaults to10k; --max-steps explicitly selects a longer budget. GPU training was not executed on the Mac.
 
 GPU版本來源：[PyTorch安裝配對](https://pytorch.org/get-started/previous-versions/)、[PyTorch2.7 Blackwell支援](https://pytorch.org/blog/pytorch-2-7/)。三種GPU仍需在各自instance通過CUDA測試，Mac上的測試不代表實體GPU已驗證。
 
@@ -142,3 +148,68 @@ bash scripts/diagnose_natural_fullgray.sh
 先確認未切塊圖片中的自然物體是否也灰階，再看train/val及online/EMA/Direct/sample
 差異。若某圖進入fallback，不能把方塊直接歸因於模型。8張子集不是全資料集驗證，
 整張圖的平均彩度也不是物體辨識指標，需一起看固定比較圖。
+
+## 2026-09-16：50k階段監測與報告
+
+新訓練（0→50k）：
+
+```bash
+bash scripts/train_mixed_uieb_div2k.sh \
+  --max-steps 50000 --output-dir outputs/uieb_div2k_rgb_fullgray_50k
+```
+
+同一輸出目錄中斷後續訓：
+
+```bash
+bash scripts/train_mixed_uieb_div2k.sh \
+  --max-steps 50000 --output-dir outputs/uieb_div2k_rgb_fullgray_50k --resume
+```
+
+- 每1k驗證及固定圖記錄、更新latest/best；best以完整混合validation的Delta-E76選擇。
+- 每10k保留 `checkpoints/step_010000.pt`、`step_020000.pt`、`step_030000.pt`、`step_040000.pt`、`step_050000.pt`。
+- 每個step的固定圖在 `debug_previews/step_<六位step>/train|val/`，每張依序target/gray/direct EMA/sample EMA。輸出是同一張圖片的128中心crop，與完整圖片推論是否tile無關。
+- 相同預覽原圖與tensor hash可逐階段比較。UIEB/DIV2K每個split各8張是小型診斷集，不是各資料集全體分數；完整混合validation仍另外記錄。
+
+訓練到任何階段後可在另一個terminal產生報告（只讀紀錄，不載入GPU模型）：
+
+```bash
+.venv/bin/python tools/report_mixed_monitor.py \
+  --run-dir outputs/uieb_div2k_rgb_fullgray_50k
+```
+
+輸出 `monitor_report/`：`fixed_train_trends.png`、`fixed_val_trends.png`、`training_validation.png`，以及 `image_comparisons/` 的10k/20k/30k/40k/50k逐張階段對照。尚未完成的階段列在 `report.json` 的missing_stages，不會捏造或補插圖片。`--steps 1000 2000 3000`可改看早期階段。工具驗證固定來源hash、逐圖平均與預覽hash，只採用對應的已完成診斷pass；資料或圖片不一致會停止。
+
+若原本50k訓練已在舊版啟動，先等保存checkpoint並停止程序，git pull後用同一輸出目錄 `--resume`。這次只允許已知前版mixed fingerprint的監測升級，仍嚴格檢查模型、退化方式、資料、學習率與有效batch；不允許混用CIFAR或其他設定權重。新增CSV／圖片從更新後開始，錯過的10k checkpoint不會自動生成。
+
+## CUDA launch failure 的定位與進度保護
+
+使用者回報在完整場景預覽遇到 `CUDA error: unspecified launch failure`。這不是已確認的OOM，也無法只靠最後的degrade()堆疊判定根因。CUDA錯誤可能非同步回報；原程序失敗後須用新程序除錯。
+
+新版先完成完整crop validation，**保存checkpoint和固定crop監測，再做完整場景預覽**。若之後預覽失敗，`latest.pt`已保留該更新；`debug_diagnostics.jsonl`記錄validation階段、錯誤類型及訊息。這不保證GPU驅動／硬體故障時仍能成功存檔；只有先前已成功保存的檔案可用。非OOM錯誤仍向外拋出，不能捕捉後繼續使用可能失效的CUDA context。
+
+確認CUDA仍可使用：
+
+```bash
+nvidia-smi
+.venv/bin/python tools/check_environment.py --require-cuda
+```
+
+用同步模式從最後成功存檔定位錯誤（除錯時速度會變慢）：
+
+```bash
+CUDA_LAUNCH_BLOCKING=1 TORCH_SHOW_CPP_STACKTRACES=1 \
+  bash scripts/train_mixed_uieb_div2k.sh \
+  --max-steps 50000 --output-dir outputs/uieb_div2k_rgb_fullgray_50k --resume
+```
+
+若要隔離完整場景預覽這條路徑，可明確設定以下選項；固定crop監測、完整crop validation與checkpoint仍保留，而且會記錄預覽被停用。這是定位用開關，不是修復證據，也不是切塊：
+
+```bash
+MIXED_FULL_SCENE_PREVIEWS=0 CUDA_LAUNCH_BLOCKING=1 \
+  bash scripts/train_mixed_uieb_div2k.sh \
+  --max-steps 50000 --output-dir outputs/uieb_div2k_rgb_fullgray_50k --resume
+```
+
+如果連環境檢查都失敗，先處理instance/GPU健康狀態，不能用取消檢查或強制tile掩蓋。若尚未產生任何checkpoint，`--resume`不會憑空恢復進度；須從新輸出目錄重新開始。
+
+依據：[PyTorch CUDA除錯說明](https://github.com/pytorch/pytorch/wiki/CUDA-basics)。上述保護與合成測試不代表已在使用者GPU重現或修復launch failure。

@@ -18,7 +18,7 @@ bash scripts/setup_mixed.sh
 ## 2. 訓練
 
 sRGB、0% 完整灰階、飽和度 1.0，UIEB reference 與 DIV2K HR 以 1：1 機率抽樣。
-預設 10k 步，每 1k 步驗證、儲存 checkpoint 與除錯 log。
+預設 10k 步，每 1k 步驗證與固定圖片監測，每 10k 保留 checkpoint（[50k 訓練與比較](docs/mixed_training.md)）。
 
 ```bash
 bash scripts/train_mixed_uieb_div2k.sh
